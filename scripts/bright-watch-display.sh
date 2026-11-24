@@ -11,6 +11,14 @@ WATCH_DIR="${BRIGHT_WATCH_DIR:-/run/bright-watch}"
 PROC_ROOT="${BRIGHT_WATCH_PROC:-/proc}"
 APP_PACKAGE="${SS_APP_PACKAGE_JSON:-${BESZEL_AGENT_SS_APP_PACKAGE_JSON:-/home/vs/smartselect/package.json}}"
 IOT_PACKAGE="${SS_IOT_PACKAGE_JSON:-${BESZEL_AGENT_SS_IOT_PACKAGE_JSON:-/home/vs/smartiot/package.json}}"
+# Optional results. set -u must not crash when a candidate never sets them.
+XRR_USER="${XRR_USER:-}"
+XRR_ERROR="${XRR_ERROR:-}"
+X_AUTH_SOURCE="${X_AUTH_SOURCE:-}"
+X_OUTPUT="${X_OUTPUT:-}"
+X_GEOMETRY="${X_GEOMETRY:-}"
+X_ROTATION="${X_ROTATION:-}"
+X_MODE="${X_MODE:-}"
 
 log() {
   printf 'bright-watch: %s\n' "$*" >&2
@@ -297,52 +305,62 @@ field_value() {
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
 }
 
-# Run xrandr. If root is refused, retry as the user who owns the authority file.
+trim_spaces() {
+  local value="${1:-}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+# Try xrandr as the current user, then as the file owner via runuser.
+# stdout is the query. XRR_USER is the owner when that retry was required.
 run_xrandr_query() {
-  local display="$1" auth="$2" user="$3"
-  local err out user_error
+  local display="${1:-}" auth="${2:-}" user="${3:-}"
+  local err="" out="" user_error="" me=""
   XRR_ERROR=""
   XRR_USER=""
+  me="$(id -un 2>/dev/null || printf '%s' unknown)"
   err="$(mktemp)"
+  log "trying xrandr display=${display} file=${auth} as ${me}"
   if out="$(DISPLAY="$display" XAUTHORITY="$auth" run_timeout 3 xrandr --query 2>"$err")"; then
     rm -f "$err"
     printf '%s\n' "$out"
     return 0
   fi
-  XRR_ERROR="$(tr '\n' ' ' <"$err")"
-  XRR_ERROR="${XRR_ERROR%"${XRR_ERROR##*[![:space:]]}"}"
+  XRR_ERROR="$(trim_spaces "$(tr '\n' ' ' <"$err")")"
   rm -f "$err"
-  if [ "$(id -u)" -eq 0 ] && [ -n "$user" ] && [ "$user" != "root" ] && xrandr_was_refused "$XRR_ERROR"; then
-    if ! command -v runuser >/dev/null 2>&1; then
-      XRR_ERROR="root refused (${XRR_ERROR}); runuser is not available for ${user}"
-      return 1
-    fi
-    err="$(mktemp)"
-    if command -v timeout >/dev/null 2>&1; then
-      out="$(runuser -u "$user" -- env DISPLAY="$display" XAUTHORITY="$auth" timeout 3 xrandr --query 2>"$err")" && {
-        rm -f "$err"
-        XRR_USER="$user"
-        printf '%s\n' "$out"
-        return 0
-      }
-    else
-      out="$(runuser -u "$user" -- env DISPLAY="$display" XAUTHORITY="$auth" xrandr --query 2>"$err")" && {
-        rm -f "$err"
-        XRR_USER="$user"
-        printf '%s\n' "$out"
-        return 0
-      }
-    fi
-    user_error="$(tr '\n' ' ' <"$err")"
-    user_error="${user_error%"${user_error##*[![:space:]]}"}"
-    rm -f "$err"
-    XRR_ERROR="root refused (${XRR_ERROR}); ${user} also failed (${user_error})"
+  log "xrandr error display=${display} file=${auth} as ${me}: ${XRR_ERROR:-unknown}"
+  if [ -z "$user" ] || [ "$user" = "$me" ]; then
+    return 1
   fi
+  if ! command -v runuser >/dev/null 2>&1; then
+    XRR_ERROR="${XRR_ERROR:-unknown}; runuser is not available for ${user}"
+    log "xrandr error display=${display} file=${auth} as ${user}: runuser is not available"
+    return 1
+  fi
+  log "trying xrandr display=${display} file=${auth} as ${user} via runuser"
+  err="$(mktemp)"
+  if command -v timeout >/dev/null 2>&1; then
+    if out="$(runuser -u "$user" -- env DISPLAY="$display" XAUTHORITY="$auth" timeout 3 xrandr --query 2>"$err")"; then
+      rm -f "$err"
+      XRR_USER="$user"
+      printf '%s\n' "$out"
+      return 0
+    fi
+  elif out="$(runuser -u "$user" -- env DISPLAY="$display" XAUTHORITY="$auth" xrandr --query 2>"$err")"; then
+    rm -f "$err"
+    XRR_USER="$user"
+    printf '%s\n' "$out"
+    return 0
+  fi
+  user_error="$(trim_spaces "$(tr '\n' ' ' <"$err")")"
+  rm -f "$err"
+  log "xrandr error display=${display} file=${auth} as ${user}: ${user_error:-unknown}"
+  XRR_ERROR="as ${me}: ${XRR_ERROR:-unknown}; as ${user}: ${user_error:-unknown}"
   return 1
 }
 
 read_xrandr() {
-  local source display auth parsed out user any=0
+  local source display auth parsed out user any=0 query_file=""
   command -v xrandr >/dev/null 2>&1 || {
     log "xrandr is not installed"
     return 1
@@ -354,9 +372,13 @@ read_xrandr() {
       continue
     fi
     user="$(auth_owner "$auth")"
-    if out="$(run_xrandr_query "$display" "$auth" "$user")"; then
-      if [ -n "$XRR_USER" ]; then
-        log "xrandr auth source=${source} display=${display} file=${auth} as user ${XRR_USER} (root was refused)"
+    query_file="$(mktemp)"
+    # Not a command substitution: that subshell drops XRR_USER and set -u then crashes.
+    if run_xrandr_query "$display" "$auth" "$user" >"$query_file"; then
+      out="$(cat "$query_file")"
+      rm -f "$query_file"
+      if [ -n "${XRR_USER:-}" ]; then
+        log "xrandr auth source=${source} display=${display} file=${auth} as user ${XRR_USER} (current user was refused)"
         X_AUTH_SOURCE="${source}:${auth} as ${XRR_USER}"
       else
         log "xrandr auth source=${source} display=${display} file=${auth}"
@@ -373,6 +395,7 @@ read_xrandr() {
       log "auth ${source} file=${auth} failed: xrandr ran but reported no connected geometry"
       continue
     fi
+    rm -f "$query_file"
     log "auth ${source} display=${display} file=${auth} failed: ${XRR_ERROR:-xrandr failed}"
   done < <(list_xauth_candidates)
   if [ "$any" -eq 0 ]; then

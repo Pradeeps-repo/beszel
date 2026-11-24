@@ -154,4 +154,82 @@ printf '%s\n' "$view" | grep -Fq "  auth: home:${tmp}/home/vs/.Xauthority" || fa
 printf '%s\n' "$view" | grep -q '  ss-app: 9.0.1' || fail "self-test app version"
 printf '%s\n' "$view" | grep -q '  ss-iot: 8.0.2' || fail "self-test iot version"
 
+# set -u must not crash when nothing is on the display, or when only user vs can run xrandr.
+unset XRR_USER XRR_ERROR X_AUTH_SOURCE || true
+no_x="${tmp}/no-x"
+mkdir -p "${no_x}/proc" "${no_x}/home" "${no_x}/run"
+PROC_ROOT="${no_x}/proc"
+BRIGHT_WATCH_HOME="${no_x}/home"
+BRIGHT_WATCH_RUNTIME="${no_x}/run"
+bin="${tmp}/bin"
+mkdir -p "$bin"
+cat >"${bin}/xrandr" <<'EOF'
+#!/bin/bash
+printf 'DISPLAY=%s XAUTHORITY=%s FAKE_AS_USER=%s\n' "${DISPLAY-}" "${XAUTHORITY-}" "${FAKE_AS_USER-}" >>"${FAKE_XRANDR_LOG:?}"
+if [ "${FAKE_AS_USER:-}" = "vs" ]; then
+  printf '%s\n' 'XWAYLAND0 connected 1080x1920+0+0 (normal left inverted right x axis y axis) 340mm x 620mm'
+  exit 0
+fi
+printf '%s\n' 'No protocol specified' >&2
+exit 1
+EOF
+cat >"${bin}/runuser" <<'EOF'
+#!/bin/bash
+user=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -u) user="$2"; shift 2 ;;
+    --) shift; break ;;
+    *) shift ;;
+  esac
+done
+export FAKE_AS_USER="$user"
+exec "$@"
+EOF
+cat >"${bin}/wlr-randr" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+cat >"${bin}/ddcutil" <<'EOF'
+#!/bin/bash
+printf '%s\n' 'No display' >&2
+exit 1
+EOF
+chmod +x "${bin}/xrandr" "${bin}/runuser" "${bin}/wlr-randr" "${bin}/ddcutil"
+saved_path="$PATH"
+PATH="${bin}:${PATH}"
+export FAKE_XRANDR_LOG="${tmp}/xrandr.log"
+: >"$FAKE_XRANDR_LOG"
+if read_xrandr; then
+  fail "no X session should not report a display"
+fi
+WATCH_DIR="${no_x}/watch"
+collect_and_write
+python3 - "${WATCH_DIR}/display.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+assert "resolution" not in data
+assert "orientation" not in data
+PY
+
+mkdir -p "${tmp}/vs-home/vs"
+vs_auth="${tmp}/vs-home/vs/.Xauthority"
+printf 'cookie\n' >"$vs_auth"
+PROC_ROOT="${no_x}/proc"
+BRIGHT_WATCH_HOME="${tmp}/vs-home"
+BRIGHT_WATCH_RUNTIME="${no_x}/run"
+: >"$FAKE_XRANDR_LOG"
+auth_owner() { printf '%s\n' vs; }
+unset XRR_USER || true
+read_xrandr || fail "xrandr as vs should succeed under set -u"
+[ "$X_GEOMETRY" = "1080x1920" ] || fail "vs geometry"
+[ "$X_OUTPUT" = "XWAYLAND0" ] || fail "vs output"
+[ "$(orientation_label "$X_GEOMETRY" "$X_ROTATION")" = "portrait" ] || fail "vs portrait"
+[ "$XRR_USER" = "vs" ] || fail "should record runuser vs, got ${XRR_USER:-unset}"
+grep -q 'DISPLAY=:0' "$FAKE_XRANDR_LOG" || fail "DISPLAY=:0 was not used"
+grep -q "XAUTHORITY=${vs_auth}" "$FAKE_XRANDR_LOG" || fail "vs Xauthority was not used"
+[ "$(awk -F 'FAKE_AS_USER=' 'NR==1 { print $2 }' "$FAKE_XRANDR_LOG")" = "" ] || fail "first attempt should be the current user"
+[ "$(awk -F 'FAKE_AS_USER=' 'NR==2 { print $2 }' "$FAKE_XRANDR_LOG")" = "vs" ] || fail "second attempt should be runuser -u vs"
+PATH="$saved_path"
+
 printf 'ok\n'
