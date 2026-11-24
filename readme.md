@@ -105,6 +105,30 @@ A working read contains `current value =` and `max value =`. `Permission denied`
 
 The systemd unit's `User=` must be that group member. Root works without the group, but it is not required.
 
+### Upgrade systemd agents
+
+Machines installed with upstream `install-agent.sh` keep the binary at `/opt/beszel-agent/beszel-agent` and the unit `beszel-agent.service` (drop-ins in `/etc/systemd/system/beszel-agent.service.d`). They are not the Docker image.
+
+Every push to `main` publishes static binaries for `linux/amd64`, `linux/arm64`, and `linux/arm` v7 on the rolling release tag `agent-latest`:
+
+- https://github.com/Pradeeps-repo/beszel/releases/download/agent-latest/beszel-agent_linux_amd64
+- https://github.com/Pradeeps-repo/beszel/releases/download/agent-latest/beszel-agent_linux_amd64.sha256
+
+The arm64 and armv7 assets use the same URL shape. On each machine, as root:
+
+```bash
+curl -fsSL -o /tmp/upgrade-agent.sh https://raw.githubusercontent.com/Pradeeps-repo/beszel/main/scripts/upgrade-agent.sh
+bash /tmp/upgrade-agent.sh
+```
+
+The script is idempotent. It detects the architecture, checks sha256 before touching the live binary, keeps the previous binary as `/opt/beszel-agent/beszel-agent.bak`, installs `ddcutil` with apt when it is missing, loads `i2c-dev` at boot, and gives the service user access to `/dev/i2c-*` (i2c group plus a udev rule). It then restarts the service and prints `systemctl status` and the brightness `ddcutil getvcp 10` returns for that user. A failed restart restores the `.bak` binary. Rollback is also printed at the end:
+
+```bash
+systemctl stop beszel-agent.service
+cp -a /opt/beszel-agent/beszel-agent.bak /opt/beszel-agent/beszel-agent
+systemctl start beszel-agent.service
+```
+
 ### Docker
 
 Pushes to `main` and version tags (`v*`) publish multi-arch (`linux/amd64`, `linux/arm64`) images to GHCR:
