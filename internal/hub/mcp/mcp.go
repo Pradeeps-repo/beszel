@@ -1,14 +1,16 @@
 // Package mcp exposes the hub's monitoring data to AI agents over the Model
 // Context Protocol (MCP).
 //
-// The server is mounted on the /mcp route (streamable HTTP transport) when the
-// BESZEL_HUB_MCP env var is set to "true". MCP clients must send a user API
-// key (created in Settings > API Keys) in the Authorization header. Only
-// read-only tools are exposed.
+// The server is mounted on the /mcp route (streamable HTTP transport) when
+// MCP_TOKEN is set, or when BESZEL_HUB_MCP=true. MCP_TOKEN is a bearer secret
+// that can read every system. PocketBase user, superuser and API-key tokens
+// are also accepted and only see that account's systems. Only read-only tools
+// are exposed.
 package mcp
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,10 +24,14 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// RegisterRoutes registers the /mcp route if MCP is enabled with the
-// BESZEL_HUB_MCP=true env var.
+// RegisterRoutes registers the /mcp route when MCP is enabled.
+// Set MCP_TOKEN (or BESZEL_HUB_MCP_TOKEN) to a bearer secret, or set
+// BESZEL_HUB_MCP=true to accept PocketBase user and superuser tokens.
+// The route is not registered when both are unset.
 func RegisterRoutes(app core.App, se *core.ServeEvent) error {
-	if enabled, _ := utils.GetEnv("MCP"); enabled != "true" {
+	_, tokenSet := configuredMCPToken()
+	enabled, _ := utils.GetEnv("MCP")
+	if !tokenSet && enabled != "true" {
 		return nil
 	}
 	server := newServer(app)
@@ -65,6 +71,14 @@ func RegisterRoutes(app core.App, se *core.ServeEvent) error {
 // apis.RequireAuth, but explains where to get an API key since MCP clients
 // are usually configured by hand.
 func requireAuth(e *core.RequestEvent) error {
+	if token, ok := configuredMCPToken(); ok && bearerMatches(e.Request, token) {
+		record, err := mcpServiceRecord(e.App)
+		if err != nil {
+			return e.InternalServerError("MCP token could not be applied", err)
+		}
+		e.Auth = record
+		return e.Next()
+	}
 	if e.Auth != nil {
 		return e.Next()
 	}
@@ -87,6 +101,43 @@ func requireAuth(e *core.RequestEvent) error {
 	return e.UnauthorizedError(msg, nil)
 }
 
+// configuredMCPToken is the optional hub-wide bearer secret. An empty value
+// disables this auth method. PocketBase user tokens still work when the
+// route is enabled with BESZEL_HUB_MCP=true.
+func configuredMCPToken() (string, bool) {
+	value, ok := utils.GetEnv("MCP_TOKEN")
+	value = strings.TrimSpace(value)
+	if !ok || value == "" {
+		return "", false
+	}
+	return value, true
+}
+
+func bearerMatches(r *http.Request, token string) bool {
+	header := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return false
+	}
+	got := strings.TrimSpace(header[len(prefix):])
+	if len(got) != len(token) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
+}
+
+// mcpServiceRecord is an unsaved superuser so the shared token can read every
+// system. It is never written to the database.
+func mcpServiceRecord(app core.App) (*core.Record, error) {
+	collection, err := app.FindCachedCollectionByNameOrId(core.CollectionNameSuperusers)
+	if err != nil {
+		return nil, err
+	}
+	record := core.NewRecord(collection)
+	record.Id = "mcp"
+	return record, nil
+}
+
 // newServer creates an MCP server with the hub's read-only tools.
 func newServer(app core.App) *mcpsdk.Server {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{
@@ -94,17 +145,11 @@ func newServer(app core.App) *mcpsdk.Server {
 		Version: beszel.Version,
 	}, &mcpsdk.ServerOptions{
 		Instructions: "Beszel is a lightweight server monitoring hub. " +
-			"Use list_systems to see monitored systems and their current usage (including battery and Wi-Fi signal), " +
-			"get_system for hardware details and current sensors, get_system_stats " +
-			"for historical metrics, get_container_stats for historical container usage " +
-			"(e.g. to find which container caused a past spike), list_containers for current container usage, " +
-			"list_services for systemd services, get_disk_health for SMART and ZFS " +
-			"health, list_network_monitors for endpoint monitoring, and list_alerts / " +
-			"list_alert_events for alert configurations and triggered events. Data " +
-			"access matches the permissions of the authenticated hub user. " +
-			"list_containers, list_services, get_disk_health and list_network_monitors " +
-			"search all visible systems when the system argument is omitted, so " +
-			"questions spanning systems need only one call.",
+			"Use list_systems to filter systems (status, name, ss-app, ss-iot, orientation, resolution, brightness). " +
+			"get_system returns one system including sensors and GPUs. " +
+			"get_system_history returns cpu, memory, disk, temperature, network and brightness samples for 1h, 12h, 24h, 1w or 30d. " +
+			"fleet_summary counts the visible fleet. list_alerts returns alert rules and recent history. " +
+			"Data access matches the authenticated user, except the MCP_TOKEN bearer which can read the whole fleet.",
 	})
 	registerTools(app, server)
 	return server

@@ -35,13 +35,26 @@ func registerTools(app core.App, server *mcpsdk.Server) {
 	h := &mcphub{app: app}
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "list_systems",
-		Description: "List monitored systems visible to the authenticated user with current CPU, memory, disk, bandwidth, temperature, battery, Wi-Fi signal and status. " +
-			"temp_c is the highest sensor (or the agent's configured primary sensor); use get_system for all sensors.",
+		Description: "List monitored systems visible to the authenticated user. " +
+			"Filter by status (up, down, paused), name substring, ss-app or ss-iot version (eq, lt, gt), orientation, resolution, and brightness range. " +
+			"Returns name, host, status, last seen, fleet fields (brightness, resolution, mode, orientation, os, kernel, ss-app, ss-iot) and CPU, memory and disk percentages. " +
+			"Results are paginated: limit defaults to 200 and cannot exceed 200, offset skips that many matches.",
 	}, h.listSystems)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "get_system",
-		Description: "Get hardware details and current usage (including temperatures, GPUs, fans, battery and Wi-Fi signal) for one system, looked up by name or id.",
+		Description: "Get hardware details, fleet fields, and the latest stats (temperatures, GPUs, fans) for one system, looked up by name or id.",
 	}, h.getSystem)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name: "get_system_history",
+		Description: "Time series for one system. range is 1h, 12h, 24h, 1w or 30d. " +
+			"metrics is any of cpu, mem, disk, temp, network, brightness. " +
+			"Uses the stored stats resolution for that range (1m, 10m, 20m, 120m, 480m).",
+	}, h.getSystemHistory)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name: "fleet_summary",
+		Description: "Counts of visible systems by status, ss-app version, ss-iot version, OS, orientation, resolution and brightness bucket, " +
+			"plus systems whose record was not updated in the last stale_minutes (default 10).",
+	}, h.fleetSummary)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "get_system_stats",
 		Description: "Get historical metrics for one system over a time range. " +
@@ -66,8 +79,9 @@ func registerTools(app core.App, server *mcpsdk.Server) {
 			"so e.g. sort=memory with limit=5 answers 'which containers use the most memory'.",
 	}, h.listContainers)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "list_alerts",
-		Description: "List the authenticated user's alert configurations (CPU, memory, disk, status, etc.) with state.",
+		Name: "list_alerts",
+		Description: "List the authenticated user's alert rules and recent alert history (triggered and resolved events). " +
+			"Superusers and the MCP_TOKEN bearer see every alert.",
 	}, h.listAlerts)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "list_alert_events",
@@ -111,6 +125,14 @@ type systemSummary struct {
 	AgentVersion string              `json:"agent_version,omitzero"`
 	Uptime       uint64              `json:"uptime_seconds,omitzero"`
 	LastSeen     string              `json:"last_seen,omitzero"` // RFC3339
+	Brightness   *uint8              `json:"brightness_pct,omitempty"`
+	Resolution   string              `json:"resolution,omitempty"`
+	Mode         string              `json:"mode,omitempty"`
+	Orientation  string              `json:"orientation,omitempty"`
+	Os           string              `json:"os,omitempty"`
+	Kernel       string              `json:"kernel,omitempty"`
+	SsApp        string              `json:"ss_app,omitempty"`
+	SsIot        string              `json:"ss_iot,omitempty"`
 }
 
 // updatesInfo describes pending package updates reported by the agent
@@ -225,16 +247,28 @@ type alertSummary struct {
 // ---------------------------------------------------------------------------
 // helpers
 
-// listVisibleSystems returns up to maxListRecords systems visible to the auth
-// record, sorted by name, plus whether more exist beyond the cap.
-func (h *mcphub) listVisibleSystems(auth *core.Record) ([]*core.Record, bool, error) {
+// listAllVisibleSystems returns every system the caller can see, in name order.
+func (h *mcphub) listAllVisibleSystems(auth *core.Record) ([]*core.Record, error) {
+	const pageSize = 500
+	const maxSystems = 5000
 	params := dbx.Params{}
 	filter := ""
 	if !auth.IsSuperuser() && !shareAllSystems() {
 		filter = "users.id ?= {:uid}"
 		params["uid"] = auth.Id
 	}
-	return h.findLimited("systems", filter, "name", maxListRecords, params)
+	all := make([]*core.Record, 0)
+	for offset := 0; offset < maxSystems; offset += pageSize {
+		records, err := h.app.FindRecordsByFilter("systems", filter, "name", pageSize, offset, params)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, records...)
+		if len(records) < pageSize {
+			break
+		}
+	}
+	return all, nil
 }
 
 // newSystemSummary builds the common fields from a system record.
@@ -275,6 +309,14 @@ func newSystemSummary(record *core.Record) systemSummary {
 		if info.Battery != (system.Battery{}) {
 			s.Battery = &batteryInfo{Percent: info.Battery[0], State: batteryStateNames[info.Battery[1]]}
 		}
+		s.Brightness = info.Brightness
+		s.Resolution = info.Screen
+		s.Mode = info.Mode
+		s.Orientation = info.Orientation
+		s.Os = info.OsRelease
+		s.Kernel = info.KernelVersion
+		s.SsApp = info.SsApp
+		s.SsIot = info.SsIot
 		if len(info.WiFi) > 0 {
 			s.WiFi = make(map[string]wifiInfo, len(info.WiFi))
 			for iface, wifi := range info.WiFi {
@@ -291,28 +333,76 @@ func newSystemSummary(record *core.Record) systemSummary {
 // ---------------------------------------------------------------------------
 // tools
 
-type noParams struct{}
+type listSystemsParams struct {
+	Status        string         `json:"status,omitempty" jsonschema:"only systems with this status: up, down or paused"`
+	Name          string         `json:"name,omitempty" jsonschema:"only systems whose name contains this text"`
+	SsApp         *versionFilter `json:"ss_app,omitempty" jsonschema:"ss-app version filter with eq, lt and/or gt"`
+	SsIot         *versionFilter `json:"ss_iot,omitempty" jsonschema:"ss-iot version filter with eq, lt and/or gt"`
+	Orientation   string         `json:"orientation,omitempty" jsonschema:"orientation text to match, for example portrait or landscape"`
+	Resolution    string         `json:"resolution,omitempty" jsonschema:"exact logical resolution, for example 1080x1920"`
+	BrightnessMin *int           `json:"brightness_min,omitempty" jsonschema:"minimum brightness percent, inclusive"`
+	BrightnessMax *int           `json:"brightness_max,omitempty" jsonschema:"maximum brightness percent, inclusive"`
+	Limit         int            `json:"limit,omitempty" jsonschema:"page size, default 200, maximum 200"`
+	Offset        int            `json:"offset,omitempty" jsonschema:"number of matching systems to skip"`
+}
 
-// listSystems returns all visible systems with current usage.
-func (h *mcphub) listSystems(ctx context.Context, req *mcpsdk.CallToolRequest, _ noParams) (*mcpsdk.CallToolResult, systemList, error) {
+type versionFilter struct {
+	Eq string `json:"eq,omitempty" jsonschema:"version must equal this value"`
+	Lt string `json:"lt,omitempty" jsonschema:"version must be lower than this value"`
+	Gt string `json:"gt,omitempty" jsonschema:"version must be higher than this value"`
+}
+
+// listSystems returns visible systems with current usage, optionally filtered.
+func (h *mcphub) listSystems(ctx context.Context, req *mcpsdk.CallToolRequest, params listSystemsParams) (*mcpsdk.CallToolResult, systemList, error) {
 	auth, err := h.authRecord(ctx)
 	if err != nil {
 		return nil, systemList{}, err
 	}
-	records, hasMore, err := h.listVisibleSystems(auth)
+	records, err := h.listAllVisibleSystems(auth)
 	if err != nil {
 		return nil, systemList{}, err
 	}
-	systems := make([]systemSummary, 0, len(records))
+	matched := make([]*core.Record, 0, len(records))
 	for _, record := range records {
+		if fleetRecordMatches(record, params) {
+			matched = append(matched, record)
+		}
+	}
+	limit := params.Limit
+	if limit <= 0 || limit > maxListRecords {
+		limit = maxListRecords
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(matched) {
+		offset = len(matched)
+	}
+	end := offset + limit
+	truncated := end < len(matched)
+	if end > len(matched) {
+		end = len(matched)
+	}
+	page := matched[offset:end]
+	systems := make([]systemSummary, 0, len(page))
+	for _, record := range page {
 		systems = append(systems, newSystemSummary(record))
 	}
-	return nil, systemList{Count: len(systems), Truncated: hasMore, Systems: systems}, nil
+	return nil, systemList{
+		Count:     len(systems),
+		Total:     len(matched),
+		Offset:    offset,
+		Truncated: truncated,
+		Systems:   systems,
+	}, nil
 }
 
 type systemList struct {
 	Count     int             `json:"count"`
-	Truncated bool            `json:"truncated,omitzero"` // more systems exist beyond the returned cap
+	Total     int             `json:"total"`
+	Offset    int             `json:"offset,omitzero"`
+	Truncated bool            `json:"truncated,omitzero"` // more systems exist beyond this page
 	Systems   []systemSummary `json:"systems"`
 }
 
@@ -809,7 +899,9 @@ func (h *mcphub) listContainers(ctx context.Context, req *mcpsdk.CallToolRequest
 	return nil, result, nil
 }
 
-// listAlerts returns the authenticated user's alerts (all alerts for superusers).
+type noParams struct{}
+
+// listAlerts returns the authenticated user's alerts and recent history.
 func (h *mcphub) listAlerts(ctx context.Context, req *mcpsdk.CallToolRequest, _ noParams) (*mcpsdk.CallToolResult, alertList, error) {
 	auth, err := h.authRecord(ctx)
 	if err != nil {
@@ -855,7 +947,49 @@ func (h *mcphub) listAlerts(ctx context.Context, req *mcpsdk.CallToolRequest, _ 
 		}
 		result.Alerts = append(result.Alerts, alert)
 	}
+	history, err := h.recentAlertEvents(auth, 168, 50)
+	if err != nil {
+		return nil, alertList{}, err
+	}
+	result.History = history
 	return nil, result, nil
+}
+
+func (h *mcphub) recentAlertEvents(auth *core.Record, hours float64, limit int) ([]alertEvent, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	now := time.Now().UTC()
+	queryParams := dbx.Params{
+		"from": now.Add(-time.Duration(hours * float64(time.Hour))).Format(types.DefaultDateLayout),
+	}
+	filter := "created >= {:from}"
+	if !auth.IsSuperuser() {
+		filter = "user = {:uid} && created >= {:from}"
+		queryParams["uid"] = auth.Id
+	}
+	records, _, err := h.findLimited("alerts_history", filter, "-created", limit, queryParams)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]alertEvent, 0, len(records))
+	for _, record := range records {
+		event := alertEvent{
+			Id:          record.Id,
+			System:      record.GetString("system"),
+			Name:        record.GetString("name"),
+			MonitorName: record.GetString("monitor_name"),
+			TriggeredAt: record.GetDateTime("created").Time().UTC().Format(time.RFC3339),
+		}
+		if value := record.GetFloat("value"); value != 0 {
+			event.Value = &value
+		}
+		if resolved := record.GetDateTime("resolved"); !resolved.IsZero() {
+			event.ResolvedAt = resolved.Time().UTC().Format(time.RFC3339)
+		}
+		events = append(events, event)
+	}
+	return events, nil
 }
 
 type alertList struct {
@@ -863,6 +997,7 @@ type alertList struct {
 	Truncated bool              `json:"truncated,omitzero"` // more alerts exist beyond the returned cap
 	Systems   map[string]string `json:"systems,omitempty"`  // system id -> name
 	Alerts    []alertSummary    `json:"alerts"`
+	History   []alertEvent      `json:"history,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

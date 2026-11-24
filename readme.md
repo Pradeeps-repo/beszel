@@ -84,6 +84,35 @@ These are sent on the system record (not charted). A value that cannot be read i
 
 Screen and package versions are cached for five minutes. The All Systems columns are Resolution, Orientation, ss-app, ss-iot, and OS. They sort with the other columns, match the table filter, and can be hidden from Visible Fields. The same strings appear on the system page header.
 
+## MCP
+
+The hub serves a read-only [Model Context Protocol](https://modelcontextprotocol.io) endpoint at `/mcp` on the same port as the UI (8090 in Coolify). No extra container is required. The route is off until you set a token or turn the existing API-key mode on.
+
+Set a hub-wide bearer secret:
+
+```bash
+MCP_TOKEN=choose-a-long-random-string
+```
+
+`BESZEL_HUB_MCP_TOKEN` is the same variable. Leave it unset and the secret is disabled. A client that sends `Authorization: Bearer <MCP_TOKEN>` can read every system. PocketBase user, superuser, and API-key tokens are also accepted, and those calls only see the systems that account can see. To use API keys without `MCP_TOKEN`, set `BESZEL_HUB_MCP=true`.
+
+Example client config:
+
+```json
+{
+  "mcpServers": {
+    "bright-watch": {
+      "url": "http://HOST:8090/mcp",
+      "headers": {
+        "Authorization": "Bearer choose-a-long-random-string"
+      }
+    }
+  }
+}
+```
+
+Tools are read-only: `list_systems` (status, name, ss-app, ss-iot, orientation, resolution, brightness, with a limit), `get_system`, `get_system_history` (`1h`, `12h`, `24h`, `1w`, `30d`), `fleet_summary`, and `list_alerts` (rules and recent history).
+
 ### Linux DDC/CI permissions
 
 `ddcutil` needs the `i2c-dev` module and read/write access to `/dev/i2c-*`. The agent does not have to run as root.
