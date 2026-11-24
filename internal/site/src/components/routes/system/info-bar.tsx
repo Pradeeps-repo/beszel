@@ -7,8 +7,11 @@ import {
 	CpuIcon,
 	GlobeIcon,
 	MemoryStickIcon,
+	AppWindowIcon,
 	MonitorIcon,
+	RadioIcon,
 	Settings2Icon,
+	SmartphoneIcon,
 } from "lucide-react"
 import { useMemo } from "react"
 import ChartTimeSelect from "@/components/charts/chart-time-select"
@@ -58,13 +61,13 @@ export default function InfoBar({
 
 		// Use details if available, otherwise fall back to system.info
 		const hostname = details?.hostname ?? system.info.h
-		const kernel = details?.kernel ?? system.info.k
+		const kernel = details?.kernel || system.info.k
 		const cores = details?.cores ?? system.info.c
 		const threads = details?.threads ?? system.info.t ?? 0
 		const cpuModel = details?.cpu ?? system.info.m
 		const sockets = details?.sockets ?? 0
 		const os = details?.os ?? system.info.os ?? Os.Linux
-		const osName = details?.os_name
+		const osName = details?.os_name || system.info.osr
 		const arch = details?.arch
 		const memory = details?.memory
 
@@ -115,6 +118,19 @@ export default function InfoBar({
 			Icon: React.ElementType
 			hide?: boolean
 		}[]
+
+		if (system.info.res) {
+			info.push({ value: system.info.res, Icon: MonitorIcon, label: t`Resolution` })
+		}
+		if (system.info.ori) {
+			info.push({ value: system.info.ori, Icon: SmartphoneIcon, label: t`Orientation` })
+		}
+		if (system.info.ssa) {
+			info.push({ value: `ss-app ${system.info.ssa}`, Icon: AppWindowIcon, label: "ss-app" })
+		}
+		if (system.info.ssi) {
+			info.push({ value: `ss-iot ${system.info.ssi}`, Icon: RadioIcon, label: "ss-iot" })
+		}
 
 		if (memory) {
 			const memValue = formatBytes(memory, false, undefined, false)

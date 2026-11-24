@@ -219,6 +219,16 @@ type Info struct {
 	// Brightness is the current screen brightness percent (0-100).
 	// Nil means it could not be read. Zero is a real reading and must be kept.
 	Brightness *uint8 `json:"br,omitzero" cbor:"28,keyasint,omitempty"`
+	// Screen is the connected display size, e.g. "1080x1920". Omitted when unknown.
+	Screen string `json:"res,omitempty" cbor:"29,keyasint,omitempty"`
+	// Orientation is portrait or landscape. A discovered rotation is appended, e.g. "portrait (90°)".
+	Orientation string `json:"ori,omitempty" cbor:"30,keyasint,omitempty"`
+	// SsApp is the ss-app package.json version. Omitted when the app is not found.
+	SsApp string `json:"ssa,omitempty" cbor:"31,keyasint,omitempty"`
+	// SsIot is the ss-iot package.json version. Omitted when the app is not found.
+	SsIot string `json:"ssi,omitempty" cbor:"32,keyasint,omitempty"`
+	// OsRelease is PRETTY_NAME from os-release. Kernel stays in KernelVersion.
+	OsRelease string `json:"osr,omitempty" cbor:"33,keyasint,omitempty"`
 }
 
 // Data that does not change during process lifetime and is not needed in All Systems table

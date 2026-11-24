@@ -270,6 +270,7 @@ func (a *Agent) getSystemStats(cacheTimeMs uint16) system.Stats {
 	// read leaves the field absent (or at the previous cached percent) and
 	// does not affect the stats collected above.
 	a.updateBrightness(&systemStats)
+	a.updateFleetInfo()
 
 	// update system info
 	a.systemInfo.Cpu = systemStats.Cpu

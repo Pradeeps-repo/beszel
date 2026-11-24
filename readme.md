@@ -74,6 +74,16 @@ Collection is on by default. Set `BRIGHTNESS=false` (or `BESZEL_AGENT_BRIGHTNESS
 
 The percent is `current / max * 100` from the getvcp line (`current value = N, max value = M`). Max is not assumed to be 100. A failed read is omitted, never stored as 0%. DDC is slow (about a second), so the agent caches the result for one minute, runs at most one `ddcutil` at a time, and does not wait for it before sending the other stats. The value shows up on a later sample. A permission failure logs one warning and stays omitted.
 
+### Screen, apps, and OS
+
+These are sent on the system record (not charted). A value that cannot be read is omitted, not sent as an empty string.
+
+- **Resolution and orientation.** On Linux the agent reads connected DRM connectors under `/sys/class/drm` (`status` and the first mode). That works for a root systemd service with no `DISPLAY`. Orientation is `portrait` when the mode is taller than it is wide, and `landscape` otherwise. DRM modes are the panel's hardware modes and do not include compositor rotation. When `xrandr` or `wlr-randr` is installed and a session can be discovered (`DISPLAY`/`XAUTHORITY`, or a Wayland socket under `/run/user`), the agent uses that geometry instead and appends the rotation, for example `portrait (90°)`. `xrandr` rotations are `normal` 0°, `left` 90°, `inverted` 180°, and `right` 270°.
+- **ss-app and ss-iot.** Versions come from each app's `package.json` `version`. Set `SS_APP_PACKAGE_JSON` and `SS_IOT_PACKAGE_JSON` (or the `BESZEL_AGENT_` prefixed names) to the files. When unset, the agent looks a few levels under `/opt`, `/srv`, `/home`, and the `node_modules` directories in `/usr/lib` and `/usr/local/lib` for a package whose `name` is `ss-app` or `ss-iot`. An explicit path that is missing or has no version stays omitted and is not replaced by the search.
+- **OS.** Beszel already reads `PRETTY_NAME` and the kernel for the system details record. Those strings are copied onto the system record (`osr` and the existing `k` kernel field) so the All Systems table can show them.
+
+Screen and package versions are cached for five minutes. The All Systems columns are Resolution, Orientation, ss-app, ss-iot, and OS. They sort with the other columns, match the table filter, and can be hidden from Visible Fields. The same strings appear on the system page header.
+
 ### Linux DDC/CI permissions
 
 `ddcutil` needs the `i2c-dev` module and read/write access to `/dev/i2c-*`. The agent does not have to run as root.

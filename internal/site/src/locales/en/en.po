@@ -345,6 +345,15 @@ msgstr "Became inactive"
 msgid "Before"
 msgstr "Before"
 
+#: src/components/systems-table/systems-table-columns.tsx
+msgid "OS"
+msgstr "OS"
+
+#: src/components/systems-table/systems-table-columns.tsx
+#: src/components/routes/system/info-bar.tsx
+msgid "Orientation"
+msgstr "Orientation"
+
 #. Screen brightness column and chart
 #: src/components/systems-table/systems-table-columns.tsx
 #: src/components/routes/system/charts/sensor-charts.tsx
@@ -1940,6 +1949,10 @@ msgstr "Saved in the database and does not expire until you disable it."
 #: src/components/routes/system/charts/sensor-charts.tsx
 msgid "Screen brightness"
 msgstr "Screen brightness"
+
+#: src/components/routes/settings/quiet-hours.tsx
+msgid "Resolution"
+msgstr "Resolution"
 
 #: src/components/routes/settings/quiet-hours.tsx
 msgid "Schedule"
