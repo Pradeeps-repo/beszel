@@ -236,6 +236,8 @@ type alertSummary struct {
 	Id        string   `json:"id"`
 	System    string   `json:"system"` // system id; see systems map in the list result
 	Name      string   `json:"name"`
+	Expect    string   `json:"expect,omitempty"`
+	Mode      string   `json:"mode,omitempty"`
 	Value     *float64 `json:"value,omitempty"`
 	Min       *float64 `json:"min,omitempty"`
 	Triggered bool     `json:"triggered,omitzero"`
@@ -941,6 +943,10 @@ func (h *mcphub) listAlerts(ctx context.Context, req *mcpsdk.CallToolRequest, _ 
 		}
 		if value := record.GetFloat("value"); value != 0 {
 			alert.Value = &value
+		}
+		if isFleetTextName(record.GetString("name")) {
+			alert.Mode = fleetModeLabel(record.GetFloat("value"))
+			alert.Expect = record.GetString("expect")
 		}
 		if min := record.GetFloat("min"); min != 0 {
 			alert.Min = &min

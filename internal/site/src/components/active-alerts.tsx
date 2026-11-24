@@ -27,6 +27,18 @@ function AlertTriggeredDesc({ alert }: { alert: AlertRecord }) {
 	if (alert.name === "Status") {
 		return <Trans>Connection is down</Trans>
 	}
+	if (alert.name === "BrightnessMissing") {
+		return <Trans>Brightness reading is missing</Trans>
+	}
+	if (info.text) {
+		if (alert.value === 2) {
+			return <Trans>Field is missing</Trans>
+		}
+		if (alert.value === 1) {
+			return <Trans>Doesn't match {alert.expect}</Trans>
+		}
+		return <Trans>Value changed</Trans>
+	}
 	if (info.invert) {
 		return (
 			<Trans>

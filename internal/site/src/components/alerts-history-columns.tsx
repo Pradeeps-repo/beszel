@@ -69,6 +69,10 @@ export const alertsHistoryColumns: ColumnDef<AlertsHistoryRecord>[] = [
 				return <span className="ps-2">{t`Down`}</span>
 			}
 			const value = getValue() as number
+			if (info?.text) {
+				const mode = [t`Any change`, t`Doesn't match`, t`Missing`][value] ?? ""
+				return <span className="ps-2">{mode}</span>
+			}
 			if (name === "NetworkMonitorCert") {
 				return (
 					<span className="tabular-nums ps-2.5">

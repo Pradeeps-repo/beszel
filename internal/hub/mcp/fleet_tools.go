@@ -353,3 +353,23 @@ func brightnessBucket(value *uint8) string {
 		return "75-100"
 	}
 }
+
+func isFleetTextName(name string) bool {
+	switch name {
+	case "Resolution", "Orientation", "SsApp", "SsIot", "Os":
+		return true
+	default:
+		return false
+	}
+}
+
+func fleetModeLabel(value float64) string {
+	switch int(value) {
+	case 1:
+		return "mismatch"
+	case 2:
+		return "missing"
+	default:
+		return "change"
+	}
+}

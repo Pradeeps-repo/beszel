@@ -348,6 +348,7 @@ export interface AlertRecord extends RecordModel {
 	triggered: boolean
 	value: number
 	min: number
+	expect?: string
 	// user: string
 }
 
@@ -467,6 +468,8 @@ export interface AlertInfo {
 	noDuration?: boolean
 	/** Hides the threshold control for binary alerts */
 	noThreshold?: boolean
+	/** String field alert: change, expected value, or missing */
+	text?: boolean
 	/** Description shown instead of numeric threshold and duration values */
 	triggeredDesc?: () => string
 	/** Additional information that remains visible while the alert is enabled */

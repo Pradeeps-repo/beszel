@@ -60,12 +60,12 @@ const failedUpdateToast = (error: unknown) => {
 
 /** Create or update alerts for a given name and systems (debounced per alert name) */
 const upsertAlerts = debounceByKey(
-	async ({ name, value, min, systems }: { name: string; value: number; min: number; systems: string[] }) => {
+	async ({ name, value, min, systems, expect }: { name: string; value: number; min: number; systems: string[]; expect?: string }) => {
 		try {
 			await pb.send<{ success: boolean }>(endpoint, {
 				method: "POST",
 				// overwrite is always true because we've done filtering client side
-				body: { name, value, min, systems, overwrite: true },
+				body: { name, value, min, systems, overwrite: true, expect },
 				// scope auto-cancellation per alert so a request for one alert doesn't abort another's
 				requestKey: `POST:${name}`,
 			})
@@ -114,10 +114,10 @@ export const AlertDialogContent = memo(function AlertDialogContent({ system }: {
 			// Alert names present on target but absent from source should be deleted
 			const namesToDelete = Array.from(currentTargetAlerts.keys()).filter((name) => !sourceAlerts.has(name))
 			await Promise.all([
-				...Array.from(sourceAlerts.values()).map(({ name, value, min }) =>
+				...Array.from(sourceAlerts.values()).map(({ name, value, min, expect }) =>
 					pb.send<{ success: boolean }>(endpoint, {
 						method: "POST",
-						body: { name, value, min, systems: [system.id], overwrite: true },
+						body: { name, value, min, systems: [system.id], overwrite: true, expect },
 						requestKey: name,
 					})
 				),
@@ -263,13 +263,15 @@ export function AlertContent({
 	const singleDescription = alertData.singleDesc?.()
 	/** Alerts that fire on first observation have no duration to configure */
 	const noDuration = alertData.noDuration === true
+	const isText = alertData.text === true
 	/** Binary alerts have no threshold to configure */
-	const noThreshold = !!singleDescription || alertData.noThreshold === true
+	const noThreshold = !!singleDescription || alertData.noThreshold === true || isText
 	/** Whether enabling the alert reveals anything to configure */
-	const hasControls = !(noThreshold && noDuration)
+	const hasControls = isText || !(noThreshold && noDuration)
+	const [expect, setExpect] = useState(alert?.expect ?? "")
 
 	const [checked, setChecked] = useState(global ? false : !!alert)
-	const [min, setMin] = useState(alert?.min || (noDuration ? 0 : 10))
+	const [min, setMin] = useState(alert?.min || (noDuration ? 0 : isText ? 1 : 10))
 	const { units } = alertData
 	const storedValue = alert?.value ?? (noThreshold ? 0 : (alertData.start ?? 80))
 	const [unitIndex, setUnitIndex] = useState(() => (units ? getUnitIndex(units, storedValue) : 0))
@@ -302,7 +304,7 @@ export function AlertContent({
 		return systemIds
 	}
 
-	function sendUpsert(min: number, value: number, valueFactor = factor) {
+	function sendUpsert(min: number, value: number, valueFactor = factor, nextExpect = expect) {
 		const systems = getSystemIds()
 		systems.length &&
 			upsertAlerts(alertKey, {
@@ -310,6 +312,7 @@ export function AlertContent({
 				value: Number((value * valueFactor).toFixed(6)),
 				min,
 				systems,
+				expect: nextExpect,
 			})
 	}
 
@@ -353,6 +356,50 @@ export function AlertContent({
 			{checked && hasControls && (
 				<div className="grid sm:grid-cols-2 mt-1.5 gap-5 px-4 pb-5 tabular-nums text-muted-foreground">
 					<Suspense fallback={<div className="h-10" />}>
+						{isText && (
+							<div className="col-span-full grid gap-3">
+								<div>
+									<p className="text-sm mb-2">{t`Condition`}</p>
+									<Select
+										value={String(value)}
+										onValueChange={(next) => {
+											const mode = Number(next)
+											setValue(mode)
+											if (mode === 1 && expect.trim() === "") {
+												return
+											}
+											sendUpsert(min, mode, 1, expect)
+										}}
+									>
+										<SelectTrigger className="w-full h-8">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="0">{t`Any change`}</SelectItem>
+											<SelectItem value="1">{t`Doesn't match`}</SelectItem>
+											<SelectItem value="2">{t`Missing`}</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								{value === 1 && (
+									<div>
+										<p className="text-sm mb-2">{t`Expected value`}</p>
+										<Input
+											value={expect}
+											placeholder={alertKey === "Orientation" ? "portrait" : alertKey === "Resolution" ? "1080x1920" : ""}
+											onChange={(e) => {
+												setExpect(e.target.value)
+												if (e.target.value.trim() === "") {
+													return
+												}
+												sendUpsert(min, value, 1, e.target.value)
+											}}
+											className="h-8"
+										/>
+									</div>
+								)}
+							</div>
+						)}
 						{!noThreshold && (
 							<div className={cn(noDuration && "col-span-full")}>
 								<p id={`v${name}`} className="text-sm block h-6">

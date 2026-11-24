@@ -47,7 +47,11 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 		return nil
 	}
 
-	alerts := am.alertsCache.GetAlertsExcludingNames(systemRecord.Id, "Status", alertNameSystemdFailed, containerAlertName, alertNameNetworkMonitorLoss, alertNameNetworkMonitorCert)
+	if err := am.HandleFleetFieldAlerts(systemRecord, data); err != nil {
+		am.hub.Logger().Error("Error handling fleet field alerts", "err", err)
+	}
+
+	alerts := am.alertsCache.GetAlertsExcludingNames(systemRecord.Id, "Status", alertNameSystemdFailed, containerAlertName, alertNameNetworkMonitorLoss, alertNameNetworkMonitorCert, alertNameBrightnessMissing, "Resolution", "Orientation", "SsApp", "SsIot", "Os")
 	if len(alerts) == 0 {
 		return nil
 	}
@@ -111,6 +115,11 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 				continue
 			}
 			val = float64(data.Stats.Battery[0])
+		case "Brightness":
+			if data.Info.Brightness == nil {
+				continue
+			}
+			val = float64(*data.Info.Brightness)
 		default:
 			var ok bool
 			if val, ok = cpuStateAlertValue(name, data.Stats.CpuBreakdown); !ok {
@@ -299,6 +308,11 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 					continue
 				}
 				alert.val += float64(stats.Battery[0])
+			case "Brightness":
+				if stats.Brightness == nil {
+					continue
+				}
+				alert.val += float64(*stats.Brightness)
 			default:
 				value, ok := cpuStateAlertValue(alert.name, stats.CpuBreakdown)
 				if !ok {
@@ -410,6 +424,25 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 	}
 
 	var subject string
+	if alert.name == "Brightness" {
+		if alert.triggered {
+			subject = fmt.Sprintf("Brightness on %s is %.0f%% (below %.0f%%).", systemName, alert.val, alert.threshold)
+		} else {
+			subject = fmt.Sprintf("Brightness on %s is %.0f%% (at or above %.0f%%).", systemName, alert.val, alert.threshold)
+		}
+		if err := am.setAlertTriggered(alert.alertData, alert.triggered); err != nil {
+			return
+		}
+		am.SendAlert(AlertMessageData{
+			UserID:   alert.alertData.UserID,
+			SystemID: alert.systemRecord.Id,
+			Title:    subject,
+			Message:  subject,
+			Link:     am.hub.MakeLink("system", alert.systemRecord.Id),
+			LinkText: "View " + systemName,
+		})
+		return
+	}
 	lowAlert := isLowAlert(alert.name)
 	if alert.triggered {
 		if lowAlert {
@@ -448,5 +481,5 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 }
 
 func isLowAlert(name string) bool {
-	return name == "Battery"
+	return name == "Battery" || name == "Brightness"
 }

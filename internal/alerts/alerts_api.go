@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 
 	"ganigeorgiev.com/pocketbase/dbx"
 	"ganigeorgiev.com/pocketbase/pocketbase/core"
@@ -23,10 +24,22 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 		Name      string   `json:"name"`
 		Systems   []string `json:"systems"`
 		Overwrite bool     `json:"overwrite"`
+		Expect    string   `json:"expect"`
 	}{}
 	err := e.BindBody(&reqData)
 	if err != nil || userID == "" || reqData.Name == "" || len(reqData.Systems) == 0 {
 		return e.BadRequestError("Bad data", err)
+	}
+
+	if isFleetTextAlert(reqData.Name) {
+		mode := int(reqData.Value)
+		if mode < 0 || mode > 2 {
+			return e.BadRequestError("Display alert mode must be 0 (change), 1 (mismatch), or 2 (missing)", nil)
+		}
+		reqData.Expect = strings.TrimSpace(reqData.Expect)
+		if mode == 1 && reqData.Expect == "" {
+			return e.BadRequestError("Expected value is required when the alert checks for a mismatch", nil)
+		}
 	}
 
 	if isNetworkMonitorAlert(reqData.Name) {
@@ -70,6 +83,9 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 
 			alertRecord.Set("value", reqData.Value)
 			alertRecord.Set("min", reqData.Min)
+			if isFleetTextAlert(reqData.Name) {
+				alertRecord.Set("expect", strings.TrimSpace(reqData.Expect))
+			}
 
 			if err := txApp.SaveNoValidate(alertRecord); err != nil {
 				return err
