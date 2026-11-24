@@ -97,6 +97,39 @@ export function BatteryChart({
 	)
 }
 
+export function BrightnessChart({
+	chartData,
+	grid,
+	dataEmpty,
+}: {
+	chartData: ChartData
+	grid: boolean
+	dataEmpty: boolean
+}) {
+	const hasBrightness = chartData.systemStats.some((record) => typeof record.stats?.br === "number")
+	if (!hasBrightness) {
+		return null
+	}
+	return (
+		<ChartCard empty={dataEmpty} grid={grid} title={t`Brightness`} description={t`Screen brightness`}>
+			<AreaChartDefault
+				chartData={chartData}
+				dataPoints={[
+					{
+						label: t`Brightness`,
+						dataKey: ({ stats }) => stats?.br,
+						color: 3,
+						opacity: 0.35,
+					},
+				]}
+				domain={[0, 100]}
+				tickFormatter={(val) => `${val}%`}
+				contentFormatter={({ value }) => `${value}%`}
+			/>
+		</ChartCard>
+	)
+}
+
 export function TemperatureChart({
 	chartData,
 	grid,

@@ -115,7 +115,10 @@ After=network.target
 Environment="PORT={PASTE_YOUR_PORT_HERE}"
 Environment="KEY={PASTE_YOUR_KEY_HERE}"
 # Environment="EXTRA_FILESYSTEMS={sdb}"
+# Environment="BRIGHTNESS=false"
+# Environment="BRIGHTNESS_SOURCE=auto"   # auto, ddc, or backlight
 ExecStart={/path/to/directory}/beszel-agent
+# DDC brightness: this user must be in the i2c group. See the README.
 User={YOUR_USERNAME}
 Restart=always
 
@@ -130,3 +133,17 @@ sudo systemctl daemon-reload
 sudo systemctl enable beszel-agent.service
 sudo systemctl start beszel-agent.service
 ```
+
+3. Screen brightness over DDC/CI (`ddcutil getvcp 10`) needs `i2c-dev` and access to `/dev/i2c-*` for `User=`. Root is not required.
+
+```bash
+sudo modprobe i2c-dev
+echo i2c-dev | sudo tee /etc/modules-load.d/i2c-dev.conf
+echo 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"' | sudo tee /etc/udev/rules.d/60-ddcutil-i2c.rules
+sudo udevadm control --reload && sudo udevadm trigger
+getent group i2c >/dev/null || sudo groupadd i2c
+sudo usermod -aG i2c {YOUR_USERNAME}
+sudo systemctl restart beszel-agent.service
+```
+
+Install `ddcutil` and check as that user: `sudo -u {YOUR_USERNAME} ddcutil getvcp 10`. `Permission denied` means the device node is still not in the `i2c` group. The agent logs that once and omits brightness instead of sending 0%.

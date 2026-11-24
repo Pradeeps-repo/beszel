@@ -14,6 +14,7 @@ import {
 	MemoryStickIcon,
 	PackageIcon,
 	ServerIcon,
+	SunMediumIcon,
 	TerminalSquareIcon,
 	WifiIcon,
 } from "lucide-react"
@@ -307,6 +308,23 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 						<span className="min-w-10">{pct}%</span>
 					</Link>
 				)
+			},
+		},
+		{
+			accessorFn: ({ info }) => info.br,
+			id: "brightness",
+			name: () => t({ message: "Brightness", comment: "Screen brightness column" }),
+			size: 70,
+			Icon: SunMediumIcon,
+			header: sortableHeader,
+			sortUndefined: "last",
+			cell(info) {
+				const pct = info.getValue() as number | undefined
+				// 0% is a real reading. Only an omitted value is blank.
+				if (pct === undefined) {
+					return null
+				}
+				return <span className="tabular-nums whitespace-nowrap">{pct}%</span>
 			},
 		},
 		{

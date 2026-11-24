@@ -12,6 +12,8 @@ services:
     volumes:
       - ./beszel_agent_data:/var/lib/beszel-agent
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # backlight fallback only (BRIGHTNESS_SOURCE=backlight, or auto without ddcutil)
+      # - /sys:/sys:ro
       # monitor other disks / partitions by mounting a folder in /extra-filesystems
       # - /mnt/disk1/.beszel:/extra-filesystems/disk1:ro
     environment:
@@ -19,6 +21,15 @@ services:
       KEY: "<public key>"
       HUB_URL: "<hub url>"
       TOKEN: "<token>"
+      # BRIGHTNESS: "false"
+      # BRIGHTNESS_SOURCE: "auto" # auto, ddc, or backlight
+    # DDC/CI brightness needs ddcutil inside the image (the default image does not
+    # have it) plus the host I2C devices and the host i2c group's numeric GID:
+    # group_add:
+    #   - "994" # getent group i2c | cut -d: -f3
+    # devices:
+    #   - /dev/i2c-0
+    #   - /dev/i2c-1
     # healthcheck:
     #   test: ['CMD', '/agent', 'health']
     #   interval: 120s

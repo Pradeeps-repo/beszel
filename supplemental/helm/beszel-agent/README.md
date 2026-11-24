@@ -76,6 +76,8 @@ Essential parameters to configure:
 | `env.TOKEN` | Empty | Authentication token (optional) |
 | `env.HUB_URL` | Empty | Hub URL (e.g., http://beszel-hub:8090) |
 | `env.PORT` | `45876` | Port the agent listens on |
+| `env.BRIGHTNESS` | enabled | Set to `false` to disable screen brightness collection |
+| `env.BRIGHTNESS_SOURCE` | `auto` | `auto`, `ddc`, or `backlight`. `ddc` needs `ddcutil` and the node's `/dev/i2c-*` devices |
 | `secret.existingSecret` | Empty | Name of an existing Kubernetes Secret to use |
 | `secret.sshKey` | `ssh-key` | Key name in the secret for the SSH public key |
 | `secret.tokenKey` | `token` | Key name in the secret for the authentication token |

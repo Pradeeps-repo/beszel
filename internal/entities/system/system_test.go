@@ -3,6 +3,7 @@ package system
 import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
+	"strconv"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -59,6 +60,61 @@ func TestGPUDataPowerPkgOmittedWhenZero(t *testing.T) {
 			assert.Equal(t, float64(20), jsonPayload["1"]["pp"])
 		})
 	}
+}
+
+func TestStatsBrightnessAbsentAndZero(t *testing.T) {
+	zero := uint8(0)
+	half := uint8(50)
+
+	for _, stats := range []Stats{{}, {Brightness: &zero}, {Brightness: &half}} {
+		label := "absent"
+		if stats.Brightness != nil {
+			label = strconv.Itoa(int(*stats.Brightness))
+		}
+		for name, marshal := range map[string]func(any) ([]byte, error){
+			"json_v1": json.Marshal,
+			"json_v2": func(value any) ([]byte, error) { return jsonv2.Marshal(value) },
+		} {
+			t.Run(label+"/"+name, func(t *testing.T) {
+				data, err := marshal(stats)
+				require.NoError(t, err)
+				var payload map[string]any
+				require.NoError(t, json.Unmarshal(data, &payload))
+				if stats.Brightness == nil {
+					assert.NotContains(t, payload, "br")
+				} else {
+					assert.Equal(t, float64(*stats.Brightness), payload["br"])
+				}
+				var decoded Stats
+				require.NoError(t, json.Unmarshal(data, &decoded))
+				assert.Equal(t, stats.Brightness, decoded.Brightness)
+			})
+		}
+
+		cborData, err := cbor.Marshal(stats)
+		require.NoError(t, err)
+		var decoded Stats
+		require.NoError(t, cbor.Unmarshal(cborData, &decoded))
+		if stats.Brightness == nil {
+			assert.Nil(t, decoded.Brightness)
+		} else {
+			require.NotNil(t, decoded.Brightness)
+			assert.Equal(t, *stats.Brightness, *decoded.Brightness)
+		}
+	}
+
+	info := Info{Brightness: &zero, Cpu: 1}
+	data, err := json.Marshal(info)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(data, &payload))
+	assert.Equal(t, float64(0), payload["br"])
+	cborData, err := cbor.Marshal(info)
+	require.NoError(t, err)
+	var decoded Info
+	require.NoError(t, cbor.Unmarshal(cborData, &decoded))
+	require.NotNil(t, decoded.Brightness)
+	assert.Equal(t, uint8(0), *decoded.Brightness)
 }
 
 func TestStatsDiskIOTotalAndFansTransport(t *testing.T) {

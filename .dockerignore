@@ -5,6 +5,9 @@ node_modules/
 # Go build artifacts and binaries
 build
 dist
+# The hub image embeds this UI build. The GHCR workflow creates it before docker build.
+!internal/site/dist
+!internal/site/dist/**
 *.exe
 beszel-agent
 beszel_data*

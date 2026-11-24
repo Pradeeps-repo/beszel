@@ -96,6 +96,8 @@ export interface SystemInfo {
 	rdn?: string
 	/** pending package updates [total, security] (security omitted if unknown) */
 	pu?: [number, number?]
+	/** screen brightness percent (0-100); omitted when unreadable */
+	br?: number
 }
 
 export interface SystemStats {
@@ -175,6 +177,8 @@ export interface SystemStats {
 	bats?: Record<string, number>
 	/** Wi-Fi RSSI (dBm) by interface */
 	wf?: Record<string, number>
+	/** screen brightness percent (0-100); omitted when unreadable */
+	br?: number
 	/** network interfaces [upload bytes, download bytes, total upload bytes, total download bytes] */
 	ni?: Record<string, [number, number, number, number]>
 }
