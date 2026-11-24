@@ -19,6 +19,9 @@ type CachedAlertData struct {
 	Triggered    bool
 	Min          uint8
 	PendingSince time.Time
+	Expect       string
+	FleetSeen    bool
+	FleetLast    string
 	// Immutable after publication; decoded only when the alert record changes.
 	MonitorStates      map[string]string
 	MonitorStatesValid bool
@@ -34,6 +37,14 @@ func (a *CachedAlertData) PopulateFromRecord(record *core.Record) {
 	a.Triggered = record.GetBool("triggered")
 	a.Min = uint8(record.GetInt("min"))
 	a.PendingSince = record.GetDateTime("pending_since").Time()
+	a.Expect = record.GetString("expect")
+	if isFleetTextAlert(a.Name) {
+		var state fleetAlertState
+		if record.UnmarshalJSONField("state", &state) == nil {
+			a.FleetSeen = state.Seen
+			a.FleetLast = state.Last
+		}
+	}
 	if isNetworkMonitorAlert(a.Name) {
 		var state networkMonitorAlertState
 		a.MonitorStatesValid = record.UnmarshalJSONField("state", &state) == nil

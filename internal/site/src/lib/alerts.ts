@@ -1,5 +1,5 @@
 import { t } from "@lingui/core/macro"
-import { ContainerIcon, CpuIcon, HardDriveIcon, MemoryStickIcon, NetworkIcon, ServerCrashIcon, ServerIcon, ShieldCheckIcon } from "lucide-react"
+import { ContainerIcon, CpuIcon, HardDriveIcon, MemoryStickIcon, NetworkIcon, ServerCrashIcon, ServerIcon, ShieldCheckIcon, SunMediumIcon, MonitorIcon, SmartphoneIcon, AppWindowIcon, RadioIcon } from "lucide-react"
 import { computed } from "nanostores"
 import type { RecordSubscription } from "pocketbase"
 import { EthernetIcon, GpuIcon } from "@/components/ui/icons"
@@ -133,6 +133,58 @@ export const alertInfo: Record<string, AlertInfo> = {
     start: 20,
     invert: true,
   },
+  Brightness: {
+    name: () => t`Brightness`,
+    unit: "%",
+    icon: SunMediumIcon,
+    desc: () => t`Triggers when screen brightness stays below a threshold`,
+    start: 70,
+    min: 1,
+    max: 100,
+    invert: true,
+  },
+  BrightnessMissing: {
+    name: () => t`Brightness Missing`,
+    unit: "",
+    icon: SunMediumIcon,
+    desc: () => t`Triggers when the screen brightness reading is missing`,
+    noThreshold: true,
+  },
+  Resolution: {
+    name: () => t`Resolution`,
+    unit: "",
+    icon: MonitorIcon,
+    desc: () => t`Triggers when resolution changes, does not match an expected value, or goes missing`,
+    text: true,
+  },
+  Orientation: {
+    name: () => t`Orientation`,
+    unit: "",
+    icon: SmartphoneIcon,
+    desc: () => t`Triggers when orientation changes, does not match an expected value, or goes missing`,
+    text: true,
+  },
+  SsApp: {
+    name: () => "ss-app",
+    unit: "",
+    icon: AppWindowIcon,
+    desc: () => t`Triggers when the ss-app version changes, does not match an expected value, or goes missing`,
+    text: true,
+  },
+  SsIot: {
+    name: () => "ss-iot",
+    unit: "",
+    icon: RadioIcon,
+    desc: () => t`Triggers when the ss-iot version changes, does not match an expected value, or goes missing`,
+    text: true,
+  },
+  Os: {
+    name: () => t`OS`,
+    unit: "",
+    icon: ServerIcon,
+    desc: () => t`Triggers when the OS version changes, does not match an expected value, or goes missing`,
+    text: true,
+  },
   ContainerHealth: {
     name: () => t`Container Health`,
     unit: "",
@@ -175,7 +227,7 @@ export const alertManager = (() => {
   let unsub: () => void
 
   /** Fields to fetch from alerts collection */
-  const fields = "id,name,system,value,min,triggered"
+  const fields = "id,name,system,value,min,triggered,expect"
 
   // show the number of active alerts on the favicon
   $activeAlerts.listen((activeAlerts) => updateFavicon(activeAlerts.length))

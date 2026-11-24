@@ -61,6 +61,7 @@ type SystemAlertStats struct {
 	Batteries    map[string]uint8              `json:"bats"`
 	ExtraFs      map[string]SystemAlertFsStats `json:"efs"`
 	ZfsPools     map[string]SystemAlertZfsPool `json:"z"`
+	Brightness   *uint8                        `json:"br"`
 }
 
 type SystemAlertGPUData struct {
