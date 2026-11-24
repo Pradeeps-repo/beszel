@@ -13,7 +13,7 @@ APP_PACKAGE="${SS_APP_PACKAGE_JSON:-${BESZEL_AGENT_SS_APP_PACKAGE_JSON:-/home/vs
 IOT_PACKAGE="${SS_IOT_PACKAGE_JSON:-${BESZEL_AGENT_SS_IOT_PACKAGE_JSON:-/home/vs/smartiot/package.json}}"
 
 log() {
-  printf 'bright-watch: %s\n' "$*"
+  printf 'bright-watch: %s\n' "$*" >&2
 }
 
 run_timeout() {
@@ -50,48 +50,108 @@ brightness_percent() {
   ' <<<"$1"
 }
 
-# Print "DISPLAY\nXAUTHORITY" for the first Xorg/X process with a readable -auth file.
-find_x_session() {
-  local cmdline bin display="" auth="" arg i
+# Xorg, X, and Xwayland. Mutter's XWayland is not named Xorg.
+is_x_server() {
+  case "$1" in
+    Xorg | X | Xorg.bin | Xwayland) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# True when xrandr refused the caller (root is often refused on XWayland).
+xrandr_was_refused() {
+  grep -Eqi 'no protocol specified|authorization required|can.?t open display|invalid mit-magic-cookie|not authorized|permission denied' <<<"$1"
+}
+
+# source<TAB>display<TAB>auth, in the order the field machines need:
+#   1. Xorg/Xwayland -auth from /proc/PID/cmdline
+#   2. /home/*/.Xauthority, with vs first
+#   3. mutter and gdm XWayland cookies under /run/user
+list_xauth_candidates() {
+  local cmdline bin display="" auth="" arg i name path
   local -a args
-  [ -d "$PROC_ROOT" ] || return 1
+  local seen=""
   shopt -s nullglob
-  for cmdline in "$PROC_ROOT"/[0-9]*/cmdline; do
-    [ -r "$cmdline" ] || continue
-    args=()
-    # cmdline is NUL-separated and usually ends with a NUL.
-    mapfile -d '' -t args <"$cmdline" || true
-    [ "${#args[@]}" -gt 0 ] || continue
-    bin="${args[0]##*/}"
-    case "$bin" in
-      Xorg | X | Xorg.bin) ;;
-      *) continue ;;
+  emit_auth() {
+    local source="$1" disp="$2" file="$3"
+    [ -n "$file" ] || return 0
+    case "$seen" in
+      *"|${file}|"*) return 0 ;;
     esac
-    display=""
-    auth=""
-    for ((i = 1; i < ${#args[@]}; i++)); do
-      arg="${args[$i]}"
-      if [ "$arg" = "-auth" ] && [ $((i + 1)) -lt ${#args[@]} ]; then
-        auth="${args[$((i + 1))]}"
-        i=$((i + 1))
+    seen="${seen}|${file}|"
+    printf '%s\t%s\t%s\n' "$source" "$disp" "$file"
+  }
+  if [ -d "$PROC_ROOT" ]; then
+    for cmdline in "$PROC_ROOT"/[0-9]*/cmdline; do
+      [ -r "$cmdline" ] || continue
+      args=()
+      mapfile -d '' -t args <"$cmdline" || true
+      [ "${#args[@]}" -gt 0 ] || continue
+      bin="${args[0]##*/}"
+      is_x_server "$bin" || continue
+      display=""
+      auth=""
+      for ((i = 1; i < ${#args[@]}; i++)); do
+        arg="${args[$i]}"
+        if [ "$arg" = "-auth" ] && [ $((i + 1)) -lt ${#args[@]} ]; then
+          auth="${args[$((i + 1))]}"
+          i=$((i + 1))
+          continue
+        fi
+        case "$arg" in
+          :*)
+            case "$arg" in
+              *=*) ;;
+              *) display="$arg" ;;
+            esac
+            ;;
+        esac
+      done
+      if [ -z "$auth" ]; then
+        log "auth proc:${bin} skipped: no -auth in ${cmdline}"
         continue
       fi
-      case "$arg" in
-        :*)
-          case "$arg" in
-            *=*) ;;
-            *) display="$arg" ;;
-          esac
-          ;;
-      esac
-    done
-    if [ -n "$auth" ] && [ -f "$auth" ]; then
       [ -n "$display" ] || display=":0"
-      printf '%s\n%s\n' "$display" "$auth"
-      return 0
-    fi
+      if [ ! -f "$auth" ]; then
+        log "auth proc:${bin} skipped: ${auth} is not a file"
+        continue
+      fi
+      emit_auth "proc:${bin}" "$display" "$auth"
+    done
+  fi
+  local home_root="${BRIGHT_WATCH_HOME:-/home}"
+  if [ -f "${home_root}/vs/.Xauthority" ]; then
+    emit_auth "home" ":0" "${home_root}/vs/.Xauthority"
+  fi
+  for path in "${home_root}"/*/.Xauthority; do
+    [ -f "$path" ] || continue
+    name="$(basename "$(dirname "$path")")"
+    [ "$name" = "vs" ] && continue
+    emit_auth "home" ":0" "$path"
   done
-  return 1
+  local runtime_root="${BRIGHT_WATCH_RUNTIME:-/run/user}"
+  for path in "${runtime_root}"/*/.mutter-Xwaylandauth.*; do
+    [ -f "$path" ] || continue
+    emit_auth "mutter" ":0" "$path"
+  done
+  for path in "${runtime_root}"/*/gdm/Xauthority; do
+    [ -f "$path" ] || continue
+    emit_auth "gdm" ":0" "$path"
+  done
+}
+
+# Print "DISPLAY\nXAUTHORITY" for the first X server -auth file.
+find_x_session() {
+  local line display auth
+  line="$(list_xauth_candidates | awk -F '\t' '$1 ~ /^proc:/ { print; exit }')"
+  [ -n "$line" ] || return 1
+  display="$(printf '%s\n' "$line" | awk -F '\t' '{ print $2 }')"
+  auth="$(printf '%s\n' "$line" | awk -F '\t' '{ print $3 }')"
+  printf '%s\n%s\n' "$display" "$auth"
+}
+
+auth_owner() {
+  stat -c '%U' "$1" 2>/dev/null || true
 }
 
 # xrandr --query. Geometry on the connected line is already rotated.
@@ -134,6 +194,10 @@ parse_xrandr_text() {
       capture = 0
     }
     END {
+      # XWayland often has no starred mode. The connected geometry is the live size.
+      if (mode == "" && geo != "") {
+        mode = geo
+      }
       printf "output=%s\ngeometry=%s\nrotation=%s\nmode=%s\n", output, geo, rot, mode
     }
   '
@@ -233,23 +297,88 @@ field_value() {
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
 }
 
-read_xrandr() {
-  local session display auth parsed out
-  session="$(find_x_session)" || return 1
-  display="$(printf '%s\n' "$session" | awk 'NR==1')"
-  auth="$(printf '%s\n' "$session" | awk 'NR==2')"
-  [ -n "$display" ] && [ -n "$auth" ] || return 1
-  command -v xrandr >/dev/null 2>&1 || return 1
-  if ! out="$(DISPLAY="$display" XAUTHORITY="$auth" run_timeout 3 xrandr --query 2>/dev/null)"; then
-    log "xrandr failed for ${display}"
-    return 1
+# Run xrandr. If root is refused, retry as the user who owns the authority file.
+run_xrandr_query() {
+  local display="$1" auth="$2" user="$3"
+  local err out user_error
+  XRR_ERROR=""
+  XRR_USER=""
+  err="$(mktemp)"
+  if out="$(DISPLAY="$display" XAUTHORITY="$auth" run_timeout 3 xrandr --query 2>"$err")"; then
+    rm -f "$err"
+    printf '%s\n' "$out"
+    return 0
   fi
-  parsed="$(printf '%s\n' "$out" | parse_xrandr_text)"
-  X_OUTPUT="$(printf '%s\n' "$parsed" | field_value output)"
-  X_GEOMETRY="$(printf '%s\n' "$parsed" | field_value geometry)"
-  X_ROTATION="$(printf '%s\n' "$parsed" | field_value rotation)"
-  X_MODE="$(printf '%s\n' "$parsed" | field_value mode)"
-  [ -n "$X_GEOMETRY" ]
+  XRR_ERROR="$(tr '\n' ' ' <"$err")"
+  XRR_ERROR="${XRR_ERROR%"${XRR_ERROR##*[![:space:]]}"}"
+  rm -f "$err"
+  if [ "$(id -u)" -eq 0 ] && [ -n "$user" ] && [ "$user" != "root" ] && xrandr_was_refused "$XRR_ERROR"; then
+    if ! command -v runuser >/dev/null 2>&1; then
+      XRR_ERROR="root refused (${XRR_ERROR}); runuser is not available for ${user}"
+      return 1
+    fi
+    err="$(mktemp)"
+    if command -v timeout >/dev/null 2>&1; then
+      out="$(runuser -u "$user" -- env DISPLAY="$display" XAUTHORITY="$auth" timeout 3 xrandr --query 2>"$err")" && {
+        rm -f "$err"
+        XRR_USER="$user"
+        printf '%s\n' "$out"
+        return 0
+      }
+    else
+      out="$(runuser -u "$user" -- env DISPLAY="$display" XAUTHORITY="$auth" xrandr --query 2>"$err")" && {
+        rm -f "$err"
+        XRR_USER="$user"
+        printf '%s\n' "$out"
+        return 0
+      }
+    fi
+    user_error="$(tr '\n' ' ' <"$err")"
+    user_error="${user_error%"${user_error##*[![:space:]]}"}"
+    rm -f "$err"
+    XRR_ERROR="root refused (${XRR_ERROR}); ${user} also failed (${user_error})"
+  fi
+  return 1
+}
+
+read_xrandr() {
+  local source display auth parsed out user any=0
+  command -v xrandr >/dev/null 2>&1 || {
+    log "xrandr is not installed"
+    return 1
+  }
+  while IFS=$'\t' read -r source display auth; do
+    any=1
+    if [ ! -f "$auth" ]; then
+      log "auth ${source} skipped: ${auth} is not a file"
+      continue
+    fi
+    user="$(auth_owner "$auth")"
+    if out="$(run_xrandr_query "$display" "$auth" "$user")"; then
+      if [ -n "$XRR_USER" ]; then
+        log "xrandr auth source=${source} display=${display} file=${auth} as user ${XRR_USER} (root was refused)"
+        X_AUTH_SOURCE="${source}:${auth} as ${XRR_USER}"
+      else
+        log "xrandr auth source=${source} display=${display} file=${auth}"
+        X_AUTH_SOURCE="${source}:${auth}"
+      fi
+      parsed="$(printf '%s\n' "$out" | parse_xrandr_text)"
+      X_OUTPUT="$(printf '%s\n' "$parsed" | field_value output)"
+      X_GEOMETRY="$(printf '%s\n' "$parsed" | field_value geometry)"
+      X_ROTATION="$(printf '%s\n' "$parsed" | field_value rotation)"
+      X_MODE="$(printf '%s\n' "$parsed" | field_value mode)"
+      if [ -n "$X_GEOMETRY" ]; then
+        return 0
+      fi
+      log "auth ${source} file=${auth} failed: xrandr ran but reported no connected geometry"
+      continue
+    fi
+    log "auth ${source} display=${display} file=${auth} failed: ${XRR_ERROR:-xrandr failed}"
+  done < <(list_xauth_candidates)
+  if [ "$any" -eq 0 ]; then
+    log "xrandr: no X authority candidates (no Xorg/Xwayland -auth, no home .Xauthority, no mutter or gdm cookie)"
+  fi
+  return 1
 }
 
 read_wlr() {
@@ -287,7 +416,7 @@ read_brightness_percent() {
 }
 
 write_reports() {
-  local brightness="$1" resolution="$2" rotation="$3" mode="$4" output="$5" orientation="$6" ss_app="$7" ss_iot="$8"
+  local brightness="$1" resolution="$2" rotation="$3" mode="$4" output="$5" orientation="$6" ss_app="$7" ss_iot="$8" auth="${9:-}"
   mkdir -p "$WATCH_DIR"
   chmod 0755 "$WATCH_DIR"
   BRIGHTNESS="$brightness" \
@@ -298,6 +427,7 @@ write_reports() {
     ORIENTATION="$orientation" \
     SS_APP="$ss_app" \
     SS_IOT="$ss_iot" \
+    AUTH="$auth" \
     WATCH_DIR="$WATCH_DIR" \
     python3 - <<'PY'
 import json, os
@@ -327,6 +457,7 @@ display = {
     "resolution": clean(os.environ.get("RESOLUTION", "")),
     "rotation": clean(os.environ.get("ROTATION", "")),
     "orientation": clean(os.environ.get("ORIENTATION", "")),
+    "auth": clean(os.environ.get("AUTH", "")),
 }
 brightness = os.environ.get("BRIGHTNESS", "").strip()
 if brightness.isdigit():
@@ -396,6 +527,7 @@ print(f"  resolution: {text(display.get('resolution'))}")
 print(f"  mode: {text(display.get('mode'))}")
 print(f"  orientation: {text(display.get('orientation'))}")
 print(f"  output: {text(display.get('output'))}")
+print(f"  auth: {text(display.get('auth'))}")
 print(f"  os: {os_text}")
 print(f"  ss-app: {text(apps.get('ss_app'))}")
 print(f"  ss-iot: {text(apps.get('ss_iot'))}")
@@ -408,6 +540,7 @@ collect_and_write() {
   X_GEOMETRY=""
   X_ROTATION=""
   X_MODE=""
+  X_AUTH_SOURCE=""
   if read_xrandr || read_wlr; then
     output="$X_OUTPUT"
     resolution="$X_GEOMETRY"
@@ -424,8 +557,8 @@ collect_and_write() {
   fi
   ss_app="$(package_version "$APP_PACKAGE")"
   ss_iot="$(package_version "$IOT_PACKAGE")"
-  write_reports "$brightness" "$resolution" "$rotation" "$mode" "$output" "$orientation" "$ss_app" "$ss_iot"
-  log "output=${output:-absent} resolution=${resolution:-absent} mode=${mode:-absent} orientation=${orientation:-absent} brightness=${brightness:-absent} ss-app=${ss_app:-absent} ss-iot=${ss_iot:-absent}"
+  write_reports "$brightness" "$resolution" "$rotation" "$mode" "$output" "$orientation" "$ss_app" "$ss_iot" "$X_AUTH_SOURCE"
+  log "auth=${X_AUTH_SOURCE:-absent} output=${output:-absent} resolution=${resolution:-absent} mode=${mode:-absent} orientation=${orientation:-absent} brightness=${brightness:-absent} ss-app=${ss_app:-absent} ss-iot=${ss_iot:-absent}"
 }
 
 if [ "${BRIGHT_WATCH_LIB_ONLY:-}" = "1" ]; then

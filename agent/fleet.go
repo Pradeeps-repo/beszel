@@ -326,6 +326,10 @@ func parseXrandr(output string) fleetSnapshot {
 		}
 		snap := displayFromMode(geometry, rotation, true)
 		snap.Mode = currentXrandrMode(lines[i+1:])
+		// XWayland prints the live size on the connected line and no starred mode.
+		if snap.Mode == "" {
+			snap.Mode = geometry
+		}
 		snap.Output = fields[0]
 		return snap
 	}
