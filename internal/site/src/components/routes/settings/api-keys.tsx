@@ -41,7 +41,7 @@ export default function ApiKeysSettings() {
 				</h3>
 				<p className="text-sm text-muted-foreground leading-relaxed">
 					<Trans>
-						API keys let scripts and integrations use the Beszel API as your user. A key has the same access as your
+						API keys let scripts and integrations use the Bright Watch API as your user. A key has the same access as your
 						account and works until it expires or is revoked.
 					</Trans>
 				</p>

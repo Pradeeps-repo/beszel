@@ -3,6 +3,7 @@ import { getPagePath } from "@nanostores/router"
 import { subscribeKeys } from "nanostores"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useContainerChartConfigs } from "@/components/charts/hooks"
+import { productName } from "@/components/logo"
 import { pb, queueUserSettings } from "@/lib/api"
 import { SystemStatus } from "@/lib/enums"
 import {
@@ -112,7 +113,7 @@ export function useSystemData(id: string) {
 			const sys = newSystems[id]
 			if (sys) {
 				setSystem(sys)
-				document.title = `${sys?.name} / Beszel`
+				document.title = `${sys?.name} / ${productName}`
 			}
 		})
 	}, [id, systems.length])
