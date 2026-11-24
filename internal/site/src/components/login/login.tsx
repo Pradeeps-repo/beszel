@@ -78,7 +78,7 @@ export default function () {
 				<div className="text-center">
 					<h1 className="mb-3">
 						{/* Logo's aria-label provides the heading text */}
-						<Logo className="h-7 fill-foreground mx-auto" />
+						<Logo large className="mx-auto" />
 					</h1>
 					<p className="text-sm text-muted-foreground">{subtitle}</p>
 				</div>

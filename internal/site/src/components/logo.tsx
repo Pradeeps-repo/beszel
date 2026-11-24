@@ -1,32 +1,23 @@
+import { cn } from "@/lib/utils"
+
 export const productName = "Bright Watch"
 
 // Circle and B are the Bright.Blue mark from the site header logo at https://bright.blue.
 const bStem = "M87.3783 73.3519C87.4069 73.3161 87.4284 73.2803 87.457 73.2374C87.5572 73.0872 87.6502 72.9369 87.7432 72.7938C87.8076 72.6936 87.872 72.5935 87.9292 72.4933C87.9865 72.4003 88.0366 72.3073 88.0867 72.2143C88.1797 72.0497 88.2727 71.8923 88.3585 71.7277C88.38 71.6919 88.3943 71.649 88.4158 71.6132C89.1671 70.1823 89.7251 68.6368 90.0543 67.0055C90.6195 64.258 90.5193 61.3316 89.6393 58.4624C87.3712 51.0714 80.5954 46.2776 73.2544 46.1774C70.4998 46.1416 68.5036 48.7818 69.3049 51.4148C69.8344 53.1392 71.4371 54.2339 73.233 54.2768C77.1181 54.3698 80.6956 56.917 81.8976 60.8379C82.1767 61.7394 82.3055 62.6552 82.3055 63.5568C82.3055 64.351 82.2053 65.1237 82.0121 65.8607C82.005 65.8964 81.9906 65.9394 81.9835 65.9751C81.9549 66.0825 81.9262 66.1826 81.8976 66.2828C81.8762 66.3544 81.8475 66.4259 81.8261 66.4975C81.8046 66.5618 81.7831 66.6334 81.7545 66.6978C81.7259 66.7765 81.6973 66.8552 81.6615 66.9339C81.64 66.9983 81.6114 67.0555 81.59 67.1199C81.5613 67.1915 81.5327 67.2559 81.4969 67.3274C81.4683 67.399 81.4326 67.4705 81.4039 67.5421C81.3825 67.5922 81.3538 67.6422 81.3324 67.6923C81.2895 67.7782 81.2465 67.8712 81.1964 67.9571C81.1821 67.9785 81.1678 68.0071 81.1535 68.0286C79.5723 70.8906 76.5243 72.8296 73.0255 72.8296C67.9097 72.8296 63.7455 68.6654 63.7455 63.5496V29.2846C63.7455 27.0522 61.9353 25.2349 59.6958 25.2349C57.4563 25.2349 55.6461 27.0451 55.6461 29.2846V63.5782C55.6461 73.1516 63.445 80.9433 73.0255 80.9433C74.7999 80.9433 76.5099 80.6786 78.1198 80.1777C78.1198 80.1777 78.1484 80.1706 78.1627 80.1634C78.2486 80.1348 78.3273 80.1062 78.406 80.0775C82.191 78.8469 85.2748 76.4214 87.364 73.3519H87.3783Z"
 const bBar = "M46.6577 80.9133C45.9629 80.9133 45.2605 80.734 44.618 80.3529L22.3309 67.2476C21.0906 66.5228 20.3435 65.1929 20.3435 63.7508C20.3509 62.3163 21.1205 60.9863 22.3682 60.2765L44.2743 47.6942C46.2094 46.5884 48.6675 47.2534 49.7807 49.1811C50.8865 51.1162 50.2215 53.5744 48.2939 54.6877L32.4023 63.8106L48.7049 73.3968C50.625 74.525 51.2675 76.9981 50.1394 78.9183C49.3847 80.196 48.0399 80.9058 46.6577 80.9058V80.9133Z"
 
-export function Logo({ className }: { className?: string }) {
+// The old Beszel wordmark was one SVG at h-5 in the header, so the letters
+// filled that height. Putting "Watch" inside that same scaled SVG made it
+// about 9px. The mark is h-6/h-7 and the word is semibold text.
+export function Logo({ className, large = false }: { className?: string; large?: boolean }) {
 	return (
-		<svg
-			role="img"
-			aria-label={productName}
-			xmlns="http://www.w3.org/2000/svg"
-			viewBox="0 0 318 116"
-			className={className}
-		>
-			<rect x="0.98" y="0.94" width="113.99" height="113.99" rx="56.99" fill="#183EF6" />
-			<path fill="#EDEDED" d={bStem} />
-			<path fill="#EDEDED" d={bBar} />
-			<text
-				x="130"
-				y="76"
-				fill="currentColor"
-				fontFamily="InterVariable, Inter, ui-sans-serif, system-ui, sans-serif"
-				fontSize="52"
-				fontWeight="600"
-				letterSpacing="-1.4"
-			>
-				Watch
-			</text>
-		</svg>
+		<span role="img" aria-label={productName} className={cn("inline-flex items-center gap-2 text-foreground", className)}>
+			<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 116" className={cn("shrink-0", large ? "h-8 w-8" : "h-6 w-6 md:h-7 md:w-7")}>
+				<rect x="0.98" y="0.94" width="113.99" height="113.99" rx="56.99" fill="#183EF6" />
+				<path fill="#EDEDED" d={bStem} />
+				<path fill="#EDEDED" d={bBar} />
+			</svg>
+			<span className={cn("font-semibold leading-none tracking-tight", large ? "text-2xl" : "text-lg md:text-xl")}>Watch</span>
+		</span>
 	)
 }
