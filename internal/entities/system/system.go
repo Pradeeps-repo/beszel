@@ -262,4 +262,7 @@ type CombinedData struct {
 	// that omitted systemd data (for example, a short-cache dashboard request).
 	SystemdServicesUpdated bool                      `json:"systemdUpdated,omitzero" cbor:"5,keyasint,omitempty"`
 	Monitors               map[string]monitor.Result `cbor:"6,keyasint"`
+	// PackageUpdates is the cached pending-package list. Nil means this agent
+	// build did not send one. An empty list means the last check found none.
+	PackageUpdates *PackageUpdates `json:"packageUpdates,omitempty" cbor:"7,keyasint,omitempty"`
 }
