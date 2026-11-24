@@ -566,6 +566,27 @@ func TestMcpListAlertsStructuredState(t *testing.T) {
 		alerts[0].(map[string]any)["state"])
 }
 
+func TestMcpListAlertsBrightnessDirection(t *testing.T) {
+	hub, user, _, server, userSystem := setupHub(t)
+	_, err := beszelTests.CreateRecord(hub, "alerts", map[string]any{
+		"name": "Brightness", "user": user.Record.Id, "system": userSystem.Id, "value": 50, "expect": "above",
+	})
+	require.NoError(t, err)
+	_, err = beszelTests.CreateRecord(hub, "alerts", map[string]any{
+		"name": "Brightness", "user": user.Record.Id, "system": findSystemByName(t, hub, "user-system-2").Id, "value": 70,
+	})
+	require.NoError(t, err)
+	session := mcpClient(t, server.URL, user.Token)
+	data := callTool(t, session, "list_alerts", nil)
+	got := map[string]string{}
+	for _, entry := range data["alerts"].([]any) {
+		alert := entry.(map[string]any)
+		got[alert["system"].(string)] = alert["direction"].(string)
+	}
+	require.Equal(t, "above", got[userSystem.Id])
+	require.Equal(t, "below", got[findSystemByName(t, hub, "user-system-2").Id])
+}
+
 func TestMcpToolsList(t *testing.T) {
 	_, user, _, server, _ := setupHub(t)
 	session := mcpClient(t, server.URL, user.Token)

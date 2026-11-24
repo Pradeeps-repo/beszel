@@ -366,6 +366,13 @@ func isFleetTextName(name string) bool {
 	}
 }
 
+func brightnessDirectionLabel(expect string) string {
+	if strings.EqualFold(strings.TrimSpace(expect), "above") {
+		return "above"
+	}
+	return "below"
+}
+
 func fleetModeLabel(value float64) string {
 	switch int(value) {
 	case 1:

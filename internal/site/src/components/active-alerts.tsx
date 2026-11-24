@@ -39,6 +39,14 @@ function AlertTriggeredDesc({ alert }: { alert: AlertRecord }) {
 		}
 		return <Trans>Value changed</Trans>
 	}
+	if (alert.name === "Brightness" && alert.expect === "above") {
+		return (
+			<Trans>
+				Above {alert.value}
+				{info.unit} in last <Plural value={alert.min} one="# minute" other="# minutes" />
+			</Trans>
+		)
+	}
 	if (info.invert) {
 		return (
 			<Trans>

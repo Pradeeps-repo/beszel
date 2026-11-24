@@ -400,6 +400,26 @@ export function AlertContent({
 								)}
 							</div>
 						)}
+						{alertKey === "Brightness" && (
+							<div className={cn(noDuration && "col-span-full")}>
+								<p className="text-sm mb-2">{t`Direction`}</p>
+								<Select
+									value={expect === "above" ? "above" : "below"}
+									onValueChange={(next) => {
+										setExpect(next)
+										sendUpsert(min, value, factor, next)
+									}}
+								>
+									<SelectTrigger className="w-full h-8">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="below">{t`Below`}</SelectItem>
+										<SelectItem value="above">{t`Above`}</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+						)}
 						{!noThreshold && (
 							<div className={cn(noDuration && "col-span-full")}>
 								<p id={`v${name}`} className="text-sm block h-6">
@@ -408,6 +428,14 @@ export function AlertContent({
 											Expires within{" "}
 											<strong className="text-foreground">
 												<Plural value={value} one="# day" other="# days" />
+											</strong>
+										</Trans>
+									) : alertKey === "Brightness" && expect === "above" ? (
+										<Trans>
+											Average exceeds{" "}
+											<strong className="text-foreground">
+												{value}
+												{unitLabel}
 											</strong>
 										</Trans>
 									) : alertData.invert ? (

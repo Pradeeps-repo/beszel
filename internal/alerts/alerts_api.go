@@ -31,6 +31,17 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 		return e.BadRequestError("Bad data", err)
 	}
 
+	if reqData.Name == "Brightness" {
+		dir := strings.ToLower(strings.TrimSpace(reqData.Expect))
+		if dir == "" {
+			dir = "below"
+		}
+		if dir != "above" && dir != "below" {
+			return e.BadRequestError("Brightness direction must be above or below", nil)
+		}
+		reqData.Expect = dir
+	}
+
 	if isFleetTextAlert(reqData.Name) {
 		mode := int(reqData.Value)
 		if mode < 0 || mode > 2 {
@@ -83,7 +94,7 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 
 			alertRecord.Set("value", reqData.Value)
 			alertRecord.Set("min", reqData.Min)
-			if isFleetTextAlert(reqData.Name) {
+			if isFleetTextAlert(reqData.Name) || reqData.Name == "Brightness" {
 				alertRecord.Set("expect", strings.TrimSpace(reqData.Expect))
 			}
 
