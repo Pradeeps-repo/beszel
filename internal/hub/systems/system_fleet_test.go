@@ -16,6 +16,7 @@ func TestCreateRecordsFleetInfo(t *testing.T) {
 		Info: system.Info{
 			Cpu:           1,
 			Screen:        "1080x1920",
+			Mode:          "1920x1080",
 			Orientation:   "portrait",
 			SsApp:         "1.2.3",
 			SsIot:         "0.4.0",
@@ -31,6 +32,7 @@ func TestCreateRecordsFleetInfo(t *testing.T) {
 	var info map[string]any
 	require.NoError(t, record.UnmarshalJSONField("info", &info))
 	assert.Equal(t, "1080x1920", info["res"])
+	assert.Equal(t, "1920x1080", info["mod"])
 	assert.Equal(t, "portrait", info["ori"])
 	assert.Equal(t, "1.2.3", info["ssa"])
 	assert.Equal(t, "0.4.0", info["ssi"])
@@ -48,6 +50,7 @@ func TestCreateRecordsFleetInfo(t *testing.T) {
 	info = map[string]any{}
 	require.NoError(t, record.UnmarshalJSONField("info", &info))
 	assert.NotContains(t, info, "res")
+	assert.NotContains(t, info, "mod")
 	assert.NotContains(t, info, "ori")
 	assert.NotContains(t, info, "ssa")
 	assert.NotContains(t, info, "ssi")

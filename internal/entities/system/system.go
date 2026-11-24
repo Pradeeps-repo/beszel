@@ -229,6 +229,9 @@ type Info struct {
 	SsIot string `json:"ssi,omitempty" cbor:"32,keyasint,omitempty"`
 	// OsRelease is PRETTY_NAME from os-release. Kernel stays in KernelVersion.
 	OsRelease string `json:"osr,omitempty" cbor:"33,keyasint,omitempty"`
+	// Mode is the current hardware mode before rotation, e.g. "1920x1080".
+	// Screen is the logical size after rotation. Omitted when unknown.
+	Mode string `json:"mod,omitempty" cbor:"34,keyasint,omitempty"`
 }
 
 // Data that does not change during process lifetime and is not needed in All Systems table

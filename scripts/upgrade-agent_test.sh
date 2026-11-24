@@ -38,4 +38,17 @@ if brightness_percent 'current value = 50' >/dev/null 2>&1; then
   fail "missing max should not invent 100"
 fi
 
+[ "$(supplementary_groups_value '')" = "i2c" ] || fail "empty groups"
+[ "$(supplementary_groups_value 'systemd-journal')" = "systemd-journal i2c" ] || fail "keep journal"
+[ "$(supplementary_groups_value 'systemd-journal i2c')" = "systemd-journal i2c" ] || fail "i2c already present"
+
+unit='# /lib/systemd/system/beszel-agent.service
+[Service]
+User=beszel
+SupplementaryGroups=systemd-journal
+# /etc/systemd/system/beszel-agent.service.d/10-i2c.conf
+[Service]
+SupplementaryGroups=i2c'
+[ "$(printf '%s\n' "$unit" | groups_from_unit_text)" = "systemd-journal" ] || fail "ignore own drop-in"
+
 printf 'ok\n'

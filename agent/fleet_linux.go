@@ -14,17 +14,24 @@ func init() {
 	collectDisplay = collectLinuxDisplay
 }
 
-const drmClassRoot = "/sys/class/drm"
+const drmDebugRoot = "/sys/kernel/debug/dri"
 
-// collectLinuxDisplay prefers a live X or Wayland session when one can be
-// found, because DRM mode lists are the panel's hardware modes and do not
-// include compositor rotation. Without a session, orientation is inferred
-// from the connected DRM mode (height > width is portrait) and rotation is omitted.
+// collectLinuxDisplay prefers the root helper's display.json. That file has
+// the logical size after rotation. The agent's own xrandr is next, because
+// the service user often cannot read the X authority file. DRM debugfs is
+// only a last resort, and only for the current CRTC mode. The mode list in
+// /sys/class/drm/*/modes is never the current mode.
 func collectLinuxDisplay() fleetSnapshot {
+	if snap, _, ok := readFreshWatchDisplay(); ok && snap.Resolution != "" {
+		return snap
+	}
 	if snap, ok := sessionDisplay(); ok {
 		return snap
 	}
-	return readDRMDisplay(drmClassRoot)
+	if snap := readDRMCurrent(drmDebugRoot); snap.Mode != "" {
+		return snap
+	}
+	return fleetSnapshot{}
 }
 
 func sessionDisplay() (fleetSnapshot, bool) {
@@ -43,6 +50,14 @@ func queryXrandr() (fleetSnapshot, bool) {
 	}
 	display := os.Getenv("DISPLAY")
 	auth := os.Getenv("XAUTHORITY")
+	if auth == "" {
+		if foundDisplay, foundAuth, ok := findXorgAuth(procRoot); ok {
+			if display == "" {
+				display = foundDisplay
+			}
+			auth = foundAuth
+		}
+	}
 	if display == "" {
 		display = ":0"
 	}

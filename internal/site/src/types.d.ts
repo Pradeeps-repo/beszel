@@ -100,6 +100,8 @@ export interface SystemInfo {
 	br?: number
 	/** connected display size, e.g. 1080x1920 */
 	res?: string
+	/** current hardware mode before rotation, e.g. 1920x1080 */
+	mod?: string
 	/** portrait or landscape, with rotation when known */
 	ori?: string
 	/** ss-app package version */

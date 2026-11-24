@@ -122,6 +122,9 @@ export default function InfoBar({
 		if (system.info.res) {
 			info.push({ value: system.info.res, Icon: MonitorIcon, label: t`Resolution` })
 		}
+		if (system.info.mod) {
+			info.push({ value: system.info.mod, Icon: MonitorIcon, label: "Mode" })
+		}
 		if (system.info.ori) {
 			info.push({ value: system.info.ori, Icon: SmartphoneIcon, label: t`Orientation` })
 		}

@@ -97,6 +97,7 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 						sys.host.includes(newFilterInput) ||
 						sys.info.v?.includes(newFilterInput) ||
 						sys.info.res?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						sys.info.mod?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
 						sys.info.ori?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
 						sys.info.ssa?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
 						sys.info.ssi?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
