@@ -130,8 +130,8 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 		triggered := alertData.Triggered
 		threshold := alertData.Value
 
-		// Battery alert has inverted logic: trigger when value is BELOW threshold
-		lowAlert := isLowAlert(name)
+		// Battery, and Brightness unless its direction is above, trigger when the value is BELOW the threshold.
+		lowAlert := isLowAlert(name, alertData.Expect)
 
 		// CONTINUE
 		// For normal alerts: IF not triggered and curValue <= threshold, OR triggered and curValue > threshold
@@ -362,8 +362,8 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 		// log.Printf("%s: val %f | count %d | min-count %f | threshold %f\n", alert.name, alert.val, alert.count, minCount, alert.threshold)
 		// pass through alert if count is greater than or equal to minCount
 		if float32(alert.count) >= minCount {
-			// Battery alert has inverted logic: trigger when value is BELOW threshold
-			lowAlert := isLowAlert(alert.name)
+			// Battery, and Brightness unless its direction is above, trigger when the value is BELOW the threshold.
+			lowAlert := isLowAlert(alert.name, alert.alertData.Expect)
 			if lowAlert {
 				if !alert.triggered && alert.val < alert.threshold {
 					alert.triggered = true
@@ -425,11 +425,7 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 
 	var subject string
 	if alert.name == "Brightness" {
-		if alert.triggered {
-			subject = fmt.Sprintf("Brightness on %s is %.0f%% (below %.0f%%).", systemName, alert.val, alert.threshold)
-		} else {
-			subject = fmt.Sprintf("Brightness on %s is %.0f%% (at or above %.0f%%).", systemName, alert.val, alert.threshold)
-		}
+		subject = brightnessAlertMessage(systemName, alert.val, alert.threshold, alert.triggered, alert.alertData.Expect)
 		if err := am.setAlertTriggered(alert.alertData, alert.triggered); err != nil {
 			return
 		}
@@ -443,7 +439,7 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 		})
 		return
 	}
-	lowAlert := isLowAlert(alert.name)
+	lowAlert := isLowAlert(alert.name, alert.alertData.Expect)
 	if alert.triggered {
 		if lowAlert {
 			subject = fmt.Sprintf("%s %s below threshold", systemName, titleAlertName)
@@ -480,6 +476,31 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 	})
 }
 
-func isLowAlert(name string) bool {
-	return name == "Battery" || name == "Brightness"
+func isLowAlert(name, expect string) bool {
+	if name == "Battery" {
+		return true
+	}
+	return name == "Brightness" && brightnessDirection(expect) == "below"
+}
+
+// brightnessDirection is "above" only when the alert record says so.
+// Existing alerts leave the field empty and stay "below".
+func brightnessDirection(expect string) string {
+	if strings.EqualFold(strings.TrimSpace(expect), "above") {
+		return "above"
+	}
+	return "below"
+}
+
+func brightnessAlertMessage(systemName string, value, threshold float64, triggered bool, expect string) string {
+	if brightnessDirection(expect) == "above" {
+		if triggered {
+			return fmt.Sprintf("Brightness on %s is %.0f%% (above %.0f%%).", systemName, value, threshold)
+		}
+		return fmt.Sprintf("Brightness on %s is %.0f%% (at or below %.0f%%).", systemName, value, threshold)
+	}
+	if triggered {
+		return fmt.Sprintf("Brightness on %s is %.0f%% (below %.0f%%).", systemName, value, threshold)
+	}
+	return fmt.Sprintf("Brightness on %s is %.0f%% (at or above %.0f%%).", systemName, value, threshold)
 }

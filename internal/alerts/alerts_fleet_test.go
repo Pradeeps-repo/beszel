@@ -47,6 +47,38 @@ func TestBrightnessAlertBelowThreshold(t *testing.T) {
 	})
 }
 
+func TestBrightnessAlertAboveThreshold(t *testing.T) {
+	fixture := newSystemAlertTestFixture(t, "Brightness", 1, 50)
+	defer fixture.cleanup()
+	alert, err := fixture.hub.FindRecordById("alerts", fixture.alertID)
+	require.NoError(t, err)
+	alert.Set("expect", "above")
+	require.NoError(t, fixture.hub.Save(alert))
+
+	synctest.Test(t, func(t *testing.T) {
+		submitValue(fixture, t, float64(-1), setBrightnessAlertValue)
+		waitForSystemAlert(time.Second)
+		fixture.assertTriggered(t, false, "A missing brightness reading must not fire")
+		assert.Equal(t, 0, fixture.hub.TestMailer.TotalSend())
+
+		submitValue(fixture, t, float64(40), setBrightnessAlertValue)
+		waitForSystemAlert(time.Second)
+		fixture.assertTriggered(t, false, "40% is not above 50%")
+		assert.Equal(t, 0, fixture.hub.TestMailer.TotalSend())
+
+		submitValue(fixture, t, float64(80), setBrightnessAlertValue)
+		waitForSystemAlert(time.Second)
+		fixture.assertTriggered(t, true, "80% is above 50%")
+		require.NotEmpty(t, fixture.hub.TestMailer.Messages())
+		assert.Contains(t, fixture.hub.TestMailer.Messages()[0].Text, "Brightness on test-system-0 is 80% (above 50%)")
+
+		submitValue(fixture, t, float64(50), setBrightnessAlertValue)
+		waitForSystemAlert(time.Second)
+		fixture.assertTriggered(t, false, "50% recovers an above alert")
+		assert.Contains(t, fixture.hub.TestMailer.Messages()[1].Text, "at or below 50%")
+	})
+}
+
 func TestBrightnessMissingAlert(t *testing.T) {
 	fixture := newSystemAlertTestFixture(t, "BrightnessMissing", 1, 0)
 	defer fixture.cleanup()

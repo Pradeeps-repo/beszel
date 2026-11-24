@@ -137,7 +137,7 @@ export const alertInfo: Record<string, AlertInfo> = {
     name: () => t`Brightness`,
     unit: "%",
     icon: SunMediumIcon,
-    desc: () => t`Triggers when screen brightness stays below a threshold`,
+    desc: () => t`Triggers when screen brightness stays below or above a threshold`,
     start: 70,
     min: 1,
     max: 100,
