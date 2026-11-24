@@ -326,9 +326,9 @@ func newSystemSummary(record *core.Record) systemSummary {
 			s.Battery = &batteryInfo{Percent: info.Battery[0], State: batteryStateNames[info.Battery[1]]}
 		}
 		s.Brightness = info.Brightness
-		s.Resolution = info.Screen
-		s.Mode = info.Mode
-		s.Orientation = info.Orientation
+		s.Resolution = system.NormalizeDisplay(info.Screen)
+		s.Mode = system.NormalizeDisplay(info.Mode)
+		s.Orientation = system.NormalizeLabel(info.Orientation)
 		s.Os = info.OsRelease
 		s.Kernel = info.KernelVersion
 		s.SsApp = info.SsApp

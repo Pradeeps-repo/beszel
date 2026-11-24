@@ -13,7 +13,7 @@ import {
 	Settings2Icon,
 	SmartphoneIcon,
 } from "lucide-react"
-import { useMemo } from "react"
+import { Fragment, useMemo } from "react"
 import ChartTimeSelect from "@/components/charts/chart-time-select"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -31,7 +31,7 @@ import { FreeBsdIcon, TuxIcon, WebSocketIcon, WindowsIcon } from "@/components/u
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ConnectionType, connectionTypeLabels, Os, SystemStatus } from "@/lib/enums"
-import { cn, formatBytes, getHostDisplayValue, secondsToUptimeString, toFixedFloat } from "@/lib/utils"
+import { cn, displayTokens, formatBytes, getHostDisplayValue, labelTokens, secondsToUptimeString, toFixedFloat } from "@/lib/utils"
 import type { ChartData, SystemDetailsRecord, SystemRecord } from "@/types"
 
 export default function InfoBar({
@@ -119,14 +119,14 @@ export default function InfoBar({
 			hide?: boolean
 		}[]
 
-		if (system.info.res) {
-			info.push({ value: system.info.res, Icon: MonitorIcon, label: t`Resolution` })
+		for (const value of displayTokens(system.info.res)) {
+			info.push({ value, Icon: MonitorIcon, label: t`Resolution` })
 		}
-		if (system.info.mod) {
-			info.push({ value: system.info.mod, Icon: MonitorIcon, label: "Mode" })
+		for (const value of displayTokens(system.info.mod)) {
+			info.push({ value, Icon: MonitorIcon, label: "Mode" })
 		}
-		if (system.info.ori) {
-			info.push({ value: system.info.ori, Icon: SmartphoneIcon, label: t`Orientation` })
+		for (const value of labelTokens(system.info.ori)) {
+			info.push({ value, Icon: SmartphoneIcon, label: t`Orientation` })
 		}
 		if (system.info.ssa) {
 			info.push({ value: `ss-app ${system.info.ssa}`, Icon: AppWindowIcon, label: "ss-app" })
@@ -197,7 +197,7 @@ export default function InfoBar({
 							)}
 						</Tooltip>
 
-						{systemInfo.map(({ value, label, Icon, hide }) => {
+						{systemInfo.map(({ value, label, Icon, hide }, index) => {
 							if (hide || !value) {
 								return null
 							}
@@ -207,7 +207,7 @@ export default function InfoBar({
 								</div>
 							)
 							return (
-								<div key={value} className="contents">
+								<Fragment key={`${label ?? "item"}-${value}-${index}`}>
 									<Separator orientation="vertical" className="h-4 bg-primary/30" />
 									{label ? (
 										<Tooltip delayDuration={100}>
@@ -217,7 +217,7 @@ export default function InfoBar({
 									) : (
 										content
 									)}
-								</div>
+								</Fragment>
 							)
 						})}
 					</div>

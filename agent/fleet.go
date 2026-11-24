@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/henrygd/beszel/agent/utils"
+	"github.com/henrygd/beszel/internal/entities/system"
 )
 
 const fleetRefreshInterval = 5 * time.Minute
@@ -88,9 +89,9 @@ func (a *Agent) updateFleetInfo() {
 		a.fleetAt = time.Now()
 		a.fleetCached = true
 	}
-	a.systemInfo.Screen = a.fleet.Resolution
-	a.systemInfo.Orientation = a.fleet.Orientation
-	a.systemInfo.Mode = a.fleet.Mode
+	a.systemInfo.Screen = system.NormalizeDisplay(a.fleet.Resolution)
+	a.systemInfo.Orientation = system.NormalizeLabel(a.fleet.Orientation)
+	a.systemInfo.Mode = system.NormalizeDisplay(a.fleet.Mode)
 	a.systemInfo.SsApp = a.fleet.SsApp
 	a.systemInfo.SsIot = a.fleet.SsIot
 }
