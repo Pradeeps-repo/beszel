@@ -3,37 +3,43 @@
 package agent
 
 import (
+	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"os/exec"
-	"time"
 )
 
 func init() {
 	platformBrightnessFn = func() *uint8 { return readSysfsBrightness(backlightRoot) }
 	externalBrightnessFn = readDDCBrightness
+	ddcutilAvailableFn = func() bool {
+		_, err := exec.LookPath("ddcutil")
+		return err == nil
+	}
 }
 
-// readDDCBrightness asks ddcutil for VCP code 10 (brightness) when sysfs has no panel.
-// Missing ddcutil is absent, not an error. The command is killed if it stalls.
+// readDDCBrightness runs `ddcutil getvcp 10`, the same command the fleet uses to
+// read VCP 0x10. The percent is current/max, so a max other than 100 still works.
+// Missing ddcutil, no display, and permission errors are distinct. None of them
+// are reported as 0%.
 func readDDCBrightness() (*uint8, error) {
 	path, err := exec.LookPath("ddcutil")
 	if err != nil {
-		return nil, nil
+		return nil, errDDCMissing
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), ddcutilTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "getvcp", "10", "--brief")
-	out, err := cmd.Output()
+	cmd := exec.CommandContext(ctx, path, "getvcp", "10")
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	runErr := cmd.Run()
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("ddcutil timed out")
+		return nil, errors.Join(errDDCFailed, ctx.Err())
 	}
-	if err != nil {
-		return nil, err
+	text := output.String()
+	if pct, ok := parseDDCBrightness(text); ok {
+		return pct, nil
 	}
-	pct, ok := parseDDCBrightness(string(out))
-	if !ok {
-		return nil, nil
-	}
-	return pct, nil
+	return nil, classifyDDCFailure(text, runErr)
 }

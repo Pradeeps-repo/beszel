@@ -64,8 +64,62 @@ The agent adds the current screen brightness to the same stats payload it alread
 
 Collection is on by default. Set `BRIGHTNESS=false` (or `BESZEL_AGENT_BRIGHTNESS=false`) to turn it off.
 
-- **Linux:** `/sys/class/backlight` (the `raw` device when several exist, otherwise the finest scale). If that class has no readable panel, the agent tries `ddcutil getvcp 10` for an external display. That probe runs in the background and does not delay other stats; the value shows up on a later sample. Containers need the host sysfs mounted (`/sys:/sys:ro`). `ddcutil` is not in the default agent image.
-- **Windows:** WMI `WmiMonitorBrightness` in `root\wmi`. The first active monitor, by instance name, is reported.
+`BRIGHTNESS_SOURCE` (or `BESZEL_AGENT_BRIGHTNESS_SOURCE`) chooses the Linux reader:
+
+| Value | Behavior |
+| --- | --- |
+| `auto` (default) | `ddcutil getvcp 10` when `ddcutil` is installed and a display answers. Otherwise `/sys/class/backlight`. |
+| `ddc` | DDC/CI only. No backlight fallback. |
+| `backlight` | `/sys/class/backlight` only. |
+
+The percent is `current / max * 100` from the getvcp line (`current value = N, max value = M`). Max is not assumed to be 100. A failed read is omitted, never stored as 0%. DDC is slow (about a second), so the agent caches the result for one minute, runs at most one `ddcutil` at a time, and does not wait for it before sending the other stats. The value shows up on a later sample. A permission failure logs one warning and stays omitted.
+
+### Linux DDC/CI permissions
+
+`ddcutil` needs the `i2c-dev` module and read/write access to `/dev/i2c-*`. The agent does not have to run as root.
+
+On the host, as root:
+
+```bash
+# load the I2C device interface now and on boot
+modprobe i2c-dev
+printf 'i2c-dev\n' > /etc/modules-load.d/i2c-dev.conf
+
+# let the i2c group open the buses
+printf 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"\n' > /etc/udev/rules.d/60-ddcutil-i2c.rules
+udevadm control --reload
+udevadm trigger
+
+# group name is i2c; create it if the distro did not
+getent group i2c >/dev/null || groupadd i2c
+usermod -aG i2c BESZEL_AGENT_USER
+```
+
+Install `ddcutil`, then restart the agent service so it picks up the new group. Confirm with that same user (not only as root):
+
+```bash
+sudo -u BESZEL_AGENT_USER ddcutil getvcp 10
+```
+
+A working read contains `current value =` and `max value =`. `Permission denied` or `i2c_permissions` means the device node is still root-only.
+
+The systemd unit's `User=` must be that group member. Root works without the group, but it is not required.
+
+### Docker
+
+The default scratch agent image does not contain `ddcutil`. Use a host install (systemd) or an image that has `ddcutil` on `PATH`. Give the container the host I2C devices and the host `i2c` group's numeric id (`getent group i2c | cut -d: -f3`):
+
+```yaml
+group_add:
+  - "994" # host i2c GID, not the name
+devices:
+  - /dev/i2c-0
+  - /dev/i2c-1
+```
+
+List `/dev/i2c-*` on the host and pass every bus the panel uses. `privileged: true` also works and is broader than this needs. Mounting `/sys` is only the backlight fallback (`BRIGHTNESS_SOURCE=backlight`, or `auto` when `ddcutil` is absent).
+
+- **Windows:** WMI `WmiMonitorBrightness` in `root\wmi`. The first active monitor, by instance name, is reported. `BRIGHTNESS_SOURCE` does not apply.
 
 ## Help and discussion
 

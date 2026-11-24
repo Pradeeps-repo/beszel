@@ -266,9 +266,10 @@ func (a *Agent) getSystemStats(cacheTimeMs uint16) system.Stats {
 	}
 	systemStats.WiFi = wifi.Signals(a.systemInfo.WiFi)
 
-	// Screen brightness is optional. A failure leaves the field absent and
+	// Screen brightness is optional. DDC/CI is slow, so a miss or an in-flight
+	// read leaves the field absent (or at the previous cached percent) and
 	// does not affect the stats collected above.
-	a.updateBrightness(cacheTimeMs, &systemStats)
+	a.updateBrightness(&systemStats)
 
 	// update system info
 	a.systemInfo.Cpu = systemStats.Cpu

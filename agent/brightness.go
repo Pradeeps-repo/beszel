@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/entities/system"
@@ -19,16 +21,41 @@ import (
 // backlightRoot is the sysfs class for panel backlight devices.
 var backlightRoot = "/sys/class/backlight"
 
-// platformBrightnessFn reads the built-in panel. Nil on platforms without a reader.
+// platformBrightnessFn reads the non-DDC source: Linux sysfs backlight, or Windows WMI.
 var platformBrightnessFn func() *uint8
 
-// externalBrightnessFn reads an external display (DDC/CI). Nil when unsupported.
+// externalBrightnessFn runs `ddcutil getvcp 10`. Nil where DDC/CI is not implemented.
 var externalBrightnessFn func() (*uint8, error)
+
+// ddcutilAvailableFn reports whether the ddcutil binary can be executed.
+// Nil means DDC/CI is not offered on this platform.
+var ddcutilAvailableFn func() bool
+
+// brightnessRefreshInterval is how long a DDC reading is reused.
+// DDC/CI takes about a second, so this stays on the minute stats cadence.
+const brightnessRefreshInterval = time.Minute
+
+// ddcutilTimeout stops a stuck I2C read. The stats snapshot does not wait for it.
+var ddcutilTimeout = 3 * time.Second
+
+type brightnessSource uint8
+
+const (
+	brightnessSourceAuto brightnessSource = iota
+	brightnessSourceDDC
+	brightnessSourceBacklight
+)
 
 var (
 	brightnessDisabledLog sync.Once
 	brightnessReadyLog    sync.Once
+	brightnessSourceLog   sync.Once
+	brightnessDeniedLog   sync.Once
 	errBrightnessFailed   = errors.New("brightness collection failed")
+	errDDCMissing         = errors.New("ddcutil not found")
+	errDDCNoDisplay       = errors.New("no DDC display responded")
+	errDDCDenied          = errors.New("ddcutil permission denied")
+	errDDCFailed          = errors.New("ddcutil failed")
 )
 
 var (
@@ -61,11 +88,40 @@ func brightnessCollectionEnabled() bool {
 	}
 }
 
+// brightnessReadSource selects the Linux reader.
+// BRIGHTNESS_SOURCE=auto (default) uses ddcutil when it is installed and a display
+// answers, and /sys/class/backlight otherwise. ddc and backlight force one source.
+func brightnessReadSource() brightnessSource {
+	value, ok := utils.GetEnv("BRIGHTNESS_SOURCE")
+	if !ok {
+		return brightnessSourceAuto
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto":
+		return brightnessSourceAuto
+	case "ddc", "ddcutil":
+		return brightnessSourceDDC
+	case "backlight", "sysfs":
+		return brightnessSourceBacklight
+	default:
+		brightnessSourceLog.Do(func() {
+			slog.Warn("Invalid BRIGHTNESS_SOURCE, using auto", "value", value)
+		})
+		return brightnessSourceAuto
+	}
+}
+
+func ddcutilIsAvailable() bool {
+	if ddcutilAvailableFn == nil {
+		return false
+	}
+	return ddcutilAvailableFn()
+}
+
 // updateBrightness sets the current screen brightness percent.
 // A miss is left nil so the hub stores it as absent, never as 0.
-// The platform reader (sysfs or WMI) runs inline. DDC/CI runs in the background
-// so a slow display bus cannot delay the rest of the stats snapshot.
-func (a *Agent) updateBrightness(cacheTimeMs uint16, stats *system.Stats) {
+// DDC/CI is read in the background at most once per brightnessRefreshInterval.
+func (a *Agent) updateBrightness(stats *system.Stats) {
 	if stats == nil || !brightnessCollectionEnabled() {
 		return
 	}
@@ -74,46 +130,103 @@ func (a *Agent) updateBrightness(cacheTimeMs uint16, stats *system.Stats) {
 			slog.Error("brightness collection failed", "err", rec)
 		}
 	}()
-	if platformBrightnessFn != nil {
-		if pct := platformBrightnessFn(); pct != nil {
-			stats.Brightness = pct
-			logBrightness(*pct)
-			return
+	source := brightnessReadSource()
+	// Backlight and Windows WMI are local and fast. DDC is not, so auto mode
+	// only takes this path when ddcutil itself is not installed.
+	if source == brightnessSourceBacklight || (source == brightnessSourceAuto && !ddcutilIsAvailable()) {
+		if platformBrightnessFn != nil {
+			stats.Brightness = platformBrightnessFn()
+			if stats.Brightness != nil {
+				logBrightness(*stats.Brightness)
+			}
 		}
+		return
 	}
+	if !ddcutilIsAvailable() {
+		return
+	}
+	a.serveCachedBrightness(stats)
+	a.maybeRefreshBrightness(source)
+}
+
+func (a *Agent) serveCachedBrightness(stats *system.Stats) {
+	a.brightnessMu.Lock()
+	defer a.brightnessMu.Unlock()
 	if a.brightnessCached {
 		stats.Brightness = a.brightness
 	}
-	a.startExternalProbe(cacheTimeMs)
 }
 
-func (a *Agent) startExternalProbe(cacheTimeMs uint16) {
-	if externalBrightnessFn == nil {
-		a.brightness = nil
-		a.brightnessCached = true
+func (a *Agent) maybeRefreshBrightness(source brightnessSource) {
+	a.brightnessMu.Lock()
+	fresh := a.brightnessCached && time.Since(a.brightnessAt) < brightnessRefreshInterval
+	a.brightnessMu.Unlock()
+	if fresh || !a.brightnessProbe.CompareAndSwap(false, true) {
 		return
 	}
-	// Realtime requests reuse the last probe. Only the minute stats interval starts one.
-	if cacheTimeMs != defaultDataCacheTimeMs || !a.brightnessProbe.CompareAndSwap(false, true) {
-		return
-	}
-	go a.probeExternalBrightness()
+	go a.probeBrightness(source)
 }
 
-func (a *Agent) probeExternalBrightness() {
+func (a *Agent) probeBrightness(source brightnessSource) {
 	defer a.brightnessProbe.Store(false)
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("brightness collection failed", "err", rec)
+			a.storeBrightness(nil, true)
+		}
+	}()
+
 	pct, err := callExternalBrightness()
-	if err != nil && !errors.Is(err, errBrightnessFailed) {
-		slog.Debug("Error reading display brightness", "err", err)
-		pct = nil
+	if err == nil && pct == nil {
+		err = errDDCNoDisplay
 	}
-	a.Lock()
-	defer a.Unlock()
-	a.brightness = pct
-	a.brightnessCached = true
-	if pct != nil {
+	switch {
+	case err == nil:
+		a.storeBrightness(pct, true)
 		logBrightness(*pct)
+	case errors.Is(err, errDDCDenied):
+		warnBrightnessPermission(err)
+		a.storeBrightness(nil, true)
+	case errors.Is(err, errDDCMissing) || errors.Is(err, errDDCNoDisplay):
+		if source == brightnessSourceDDC {
+			a.storeBrightness(nil, true)
+			break
+		}
+		fallback := readPlatformBrightness()
+		a.storeBrightness(fallback, true)
+		if fallback != nil {
+			logBrightness(*fallback)
+		}
+	default:
+		// Timeout or other bus error. Keep the last good percent when we have
+		// one. A value we never read stays absent, not 0.
+		slog.Debug("Error reading display brightness", "err", err)
+		a.brightnessMu.Lock()
+		a.brightnessCached = true
+		a.brightnessAt = time.Now()
+		a.brightnessMu.Unlock()
 	}
+}
+
+func readPlatformBrightness() (pct *uint8) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("brightness collection failed", "err", rec)
+			pct = nil
+		}
+	}()
+	if platformBrightnessFn == nil {
+		return nil
+	}
+	return platformBrightnessFn()
+}
+
+func (a *Agent) storeBrightness(pct *uint8, cached bool) {
+	a.brightnessMu.Lock()
+	a.brightness = pct
+	a.brightnessCached = cached
+	a.brightnessAt = time.Now()
+	a.brightnessMu.Unlock()
 }
 
 // callExternalBrightness isolates DDC/CI failures, including panics, from the agent process.
@@ -126,9 +239,53 @@ func callExternalBrightness() (pct *uint8, err error) {
 		}
 	}()
 	if externalBrightnessFn == nil {
-		return nil, nil
+		return nil, errDDCMissing
 	}
 	return externalBrightnessFn()
+}
+
+func warnBrightnessPermission(err error) {
+	brightnessDeniedLog.Do(func() {
+		slog.Warn("ddcutil cannot read screen brightness (permission denied on /dev/i2c-*). Load i2c-dev (modprobe i2c-dev), install ddcutil, and grant the agent access to /dev/i2c-* via the i2c group or a udev rule: KERNEL==\"i2c-[0-9]*\", GROUP=\"i2c\", MODE=\"0660\". Restart the agent after adding the group. Brightness is omitted, not reported as 0.", "err", err)
+	})
+}
+
+// classifyDDCFailure distinguishes a permission problem from "no display" and other failures.
+// output is the combined stdout and stderr of `ddcutil getvcp 10`.
+func classifyDDCFailure(output string, err error) error {
+	text := strings.ToLower(output)
+	if err != nil {
+		text += "\n" + strings.ToLower(err.Error())
+	}
+	detail := strings.TrimSpace(output)
+	if detail == "" && err != nil {
+		detail = err.Error()
+	}
+	if len(detail) > 300 {
+		detail = detail[:300]
+	}
+	switch {
+	case ddcPermissionDenied(text):
+		return fmt.Errorf("%w: %s", errDDCDenied, detail)
+	case ddcNoDisplay(text) || err == nil:
+		return errDDCNoDisplay
+	default:
+		return fmt.Errorf("%w: %s", errDDCFailed, detail)
+	}
+}
+
+func ddcPermissionDenied(text string) bool {
+	return strings.Contains(text, "permission denied") ||
+		strings.Contains(text, "operation not permitted") ||
+		strings.Contains(text, "i2c_permissions") ||
+		strings.Contains(text, "access to i2c") ||
+		strings.Contains(text, "eacces")
+}
+
+func ddcNoDisplay(text string) bool {
+	return strings.Contains(text, "no display") ||
+		strings.Contains(text, "display not found") ||
+		strings.Contains(text, "unable to detect")
 }
 
 func logBrightness(pct uint8) {

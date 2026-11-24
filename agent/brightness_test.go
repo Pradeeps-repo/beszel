@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,10 +102,53 @@ func TestParseDDCBrightness(t *testing.T) {
 	require.NotNil(t, pct)
 	assert.Equal(t, uint8(0), *pct)
 
+	// The fleet's displays do not always use a max of 100.
+	pct, ok = parseDDCBrightness("VCP code 0x10 (Brightness): current value =    25, max value =   200\n")
+	require.True(t, ok)
+	require.NotNil(t, pct)
+	assert.Equal(t, uint8(13), *pct)
+
+	pct, ok = parseDDCBrightness("VCP 10 C 25 200\n")
+	require.True(t, ok)
+	require.NotNil(t, pct)
+	assert.Equal(t, uint8(13), *pct)
+
 	_, ok = parseDDCBrightness("VCP 10 C 50 0\n")
 	assert.False(t, ok)
+	_, ok = parseDDCBrightness("current value = 50\n")
+	assert.False(t, ok, "a missing max must not be treated as 100")
 	_, ok = parseDDCBrightness("no display\n")
 	assert.False(t, ok)
+}
+
+func TestBrightnessReadSource(t *testing.T) {
+	t.Setenv("BRIGHTNESS_SOURCE", "")
+	require.NoError(t, os.Unsetenv("BRIGHTNESS_SOURCE"))
+	require.NoError(t, os.Unsetenv("BESZEL_AGENT_BRIGHTNESS_SOURCE"))
+	assert.Equal(t, brightnessSourceAuto, brightnessReadSource())
+
+	t.Setenv("BRIGHTNESS_SOURCE", "backlight")
+	assert.Equal(t, brightnessSourceBacklight, brightnessReadSource())
+	t.Setenv("BESZEL_AGENT_BRIGHTNESS_SOURCE", "ddc")
+	assert.Equal(t, brightnessSourceDDC, brightnessReadSource())
+	t.Setenv("BESZEL_AGENT_BRIGHTNESS_SOURCE", "nope")
+	assert.Equal(t, brightnessSourceAuto, brightnessReadSource())
+}
+
+func TestClassifyDDCFailure(t *testing.T) {
+	err := classifyDDCFailure("Opening bus /dev/i2c-2: Permission denied\n", errors.New("exit status 1"))
+	assert.ErrorIs(t, err, errDDCDenied)
+
+	err = classifyDDCFailure("Access to I2C device /dev/i2c-2 is restricted. See https://www.ddcutil.com/i2c_permissions/\n", errors.New("exit status 1"))
+	assert.ErrorIs(t, err, errDDCDenied)
+
+	err = classifyDDCFailure("Display not found\n", errors.New("exit status 1"))
+	assert.ErrorIs(t, err, errDDCNoDisplay)
+	assert.NotErrorIs(t, err, errDDCDenied)
+
+	err = classifyDDCFailure("", errors.New("exit status 1"))
+	assert.ErrorIs(t, err, errDDCFailed)
+	assert.NotErrorIs(t, err, errDDCNoDisplay)
 }
 
 func TestBrightnessFromWMI(t *testing.T) {
@@ -123,9 +167,11 @@ func TestBrightnessFromWMI(t *testing.T) {
 func TestUpdateBrightness(t *testing.T) {
 	origPlatform := platformBrightnessFn
 	origExternal := externalBrightnessFn
+	origAvailable := ddcutilAvailableFn
 	t.Cleanup(func() {
 		platformBrightnessFn = origPlatform
 		externalBrightnessFn = origExternal
+		ddcutilAvailableFn = origAvailable
 	})
 
 	t.Run("disabled leaves stats unchanged", func(t *testing.T) {
@@ -138,14 +184,15 @@ func TestUpdateBrightness(t *testing.T) {
 		}
 		agent := &Agent{}
 		stats := system.Stats{Cpu: 12.5}
-		agent.updateBrightness(defaultDataCacheTimeMs, &stats)
+		agent.updateBrightness(&stats)
 		assert.Equal(t, 0, calls)
 		assert.Nil(t, stats.Brightness)
 		assert.Equal(t, 12.5, stats.Cpu)
 	})
 
-	t.Run("platform value and zero are kept", func(t *testing.T) {
-		t.Setenv("BESZEL_AGENT_BRIGHTNESS", "true")
+	t.Run("backlight source does not call ddcutil", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "backlight")
+		ddcutilAvailableFn = func() bool { return true }
 		externalCalls := 0
 		externalBrightnessFn = func() (*uint8, error) {
 			externalCalls++
@@ -156,7 +203,7 @@ func TestUpdateBrightness(t *testing.T) {
 			platformBrightnessFn = func() *uint8 { return &pct }
 			agent := &Agent{}
 			stats := system.Stats{Cpu: 3}
-			agent.updateBrightness(defaultDataCacheTimeMs, &stats)
+			agent.updateBrightness(&stats)
 			require.NotNil(t, stats.Brightness)
 			assert.Equal(t, want, *stats.Brightness)
 			assert.Equal(t, 3.0, stats.Cpu)
@@ -164,78 +211,221 @@ func TestUpdateBrightness(t *testing.T) {
 		}
 	})
 
+	t.Run("auto uses ddcutil when a display responds", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "auto")
+		ddcutilAvailableFn = func() bool { return true }
+		platformCalls := 0
+		platformBrightnessFn = func() *uint8 {
+			platformCalls++
+			pct := uint8(80)
+			return &pct
+		}
+		externalBrightnessFn = func() (*uint8, error) {
+			pct := uint8(0)
+			return &pct, nil
+		}
+		agent := &Agent{}
+		stats := system.Stats{Cpu: 4}
+		agent.updateBrightness(&stats)
+		assert.Nil(t, stats.Brightness, "the stats snapshot must not wait on DDC/CI")
+		assert.Equal(t, 4.0, stats.Cpu)
+		require.Eventually(t, func() bool {
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
+			return agent.brightnessCached && agent.brightness != nil && *agent.brightness == 0 && !agent.brightnessProbe.Load()
+		}, time.Second, 10*time.Millisecond)
+		assert.Equal(t, 0, platformCalls, "a DDC reading of 0% must not fall back to backlight")
+
+		calls := 0
+		externalBrightnessFn = func() (*uint8, error) {
+			calls++
+			t.Error("cached reading must be reused")
+			return nil, errDDCFailed
+		}
+		stats = system.Stats{}
+		agent.updateBrightness(&stats)
+		require.NotNil(t, stats.Brightness)
+		assert.Equal(t, uint8(0), *stats.Brightness)
+		assert.Equal(t, 0, calls)
+	})
+
+	t.Run("auto falls back to backlight when no display responds", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "auto")
+		ddcutilAvailableFn = func() bool { return true }
+		externalBrightnessFn = func() (*uint8, error) { return nil, errDDCNoDisplay }
+		platformBrightnessFn = func() *uint8 {
+			pct := uint8(25)
+			return &pct
+		}
+		agent := &Agent{}
+		stats := system.Stats{}
+		agent.updateBrightness(&stats)
+		assert.Nil(t, stats.Brightness)
+		require.Eventually(t, func() bool {
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
+			return agent.brightnessCached && agent.brightness != nil && *agent.brightness == 25 && !agent.brightnessProbe.Load()
+		}, time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("auto without ddcutil reads backlight inline", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "auto")
+		ddcutilAvailableFn = func() bool { return false }
+		externalCalls := 0
+		externalBrightnessFn = func() (*uint8, error) {
+			externalCalls++
+			return nil, errDDCMissing
+		}
+		platformBrightnessFn = func() *uint8 {
+			pct := uint8(33)
+			return &pct
+		}
+		agent := &Agent{}
+		stats := system.Stats{Cpu: 2}
+		agent.updateBrightness(&stats)
+		require.NotNil(t, stats.Brightness)
+		assert.Equal(t, uint8(33), *stats.Brightness)
+		assert.Equal(t, 2.0, stats.Cpu)
+		assert.Equal(t, 0, externalCalls)
+	})
+
+	t.Run("permission failure is absent and does not use backlight", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "auto")
+		ddcutilAvailableFn = func() bool { return true }
+		platformCalls := 0
+		platformBrightnessFn = func() *uint8 {
+			platformCalls++
+			pct := uint8(50)
+			return &pct
+		}
+		externalBrightnessFn = func() (*uint8, error) {
+			return nil, classifyDDCFailure("Opening /dev/i2c-2: Permission denied", errors.New("exit status 1"))
+		}
+		agent := &Agent{}
+		stats := system.Stats{Cpu: 8}
+		agent.updateBrightness(&stats)
+		assert.Equal(t, 8.0, stats.Cpu)
+		require.Eventually(t, func() bool {
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
+			return agent.brightnessCached && agent.brightness == nil && !agent.brightnessProbe.Load()
+		}, time.Second, 10*time.Millisecond)
+		assert.Nil(t, stats.Brightness)
+		assert.Equal(t, 0, platformCalls)
+	})
+
+	t.Run("forced ddc does not fall back", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "ddc")
+		ddcutilAvailableFn = func() bool { return true }
+		platformCalls := 0
+		platformBrightnessFn = func() *uint8 {
+			platformCalls++
+			pct := uint8(50)
+			return &pct
+		}
+		externalBrightnessFn = func() (*uint8, error) { return nil, errDDCNoDisplay }
+		agent := &Agent{}
+		stats := system.Stats{}
+		agent.updateBrightness(&stats)
+		require.Eventually(t, func() bool {
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
+			return agent.brightnessCached && agent.brightness == nil && !agent.brightnessProbe.Load()
+		}, time.Second, 10*time.Millisecond)
+		assert.Equal(t, 0, platformCalls)
+	})
+
+	t.Run("ddc probe is not concurrent and a failure keeps the last reading", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "ddc")
+		ddcutilAvailableFn = func() bool { return true }
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var calls atomicInt
+		externalBrightnessFn = func() (*uint8, error) {
+			if calls.add() == 1 {
+				close(started)
+			}
+			<-release
+			pct := uint8(40)
+			return &pct, nil
+		}
+		agent := &Agent{}
+		agent.updateBrightness(&system.Stats{})
+		agent.updateBrightness(&system.Stats{})
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("probe did not start")
+		}
+		assert.Equal(t, 1, calls.value())
+		close(release)
+		require.Eventually(t, func() bool {
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
+			return agent.brightnessCached && agent.brightness != nil && *agent.brightness == 40 && !agent.brightnessProbe.Load()
+		}, time.Second, 10*time.Millisecond)
+
+		externalBrightnessFn = func() (*uint8, error) { return nil, errDDCFailed }
+		agent.brightnessMu.Lock()
+		agent.brightnessAt = time.Now().Add(-brightnessRefreshInterval - time.Second)
+		agent.brightnessMu.Unlock()
+		agent.updateBrightness(&system.Stats{})
+		require.Eventually(t, func() bool {
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
+			return !agent.brightnessProbe.Load() && agent.brightness != nil && *agent.brightness == 40
+		}, time.Second, 10*time.Millisecond)
+	})
+
 	t.Run("platform panic does not escape", func(t *testing.T) {
-		t.Setenv("BRIGHTNESS", "true")
+		t.Setenv("BRIGHTNESS_SOURCE", "backlight")
 		platformBrightnessFn = func() *uint8 { panic("backlight") }
-		externalBrightnessFn = func() (*uint8, error) { return nil, nil }
 		agent := &Agent{}
 		stats := system.Stats{Cpu: 9}
 		assert.NotPanics(t, func() {
-			agent.updateBrightness(defaultDataCacheTimeMs, &stats)
+			agent.updateBrightness(&stats)
 		})
 		assert.Nil(t, stats.Brightness)
 		assert.Equal(t, 9.0, stats.Cpu)
 	})
 
-	t.Run("external fallback is absent until the probe finishes", func(t *testing.T) {
-		t.Setenv("BRIGHTNESS", "true")
-		platformBrightnessFn = func() *uint8 { return nil }
-		externalBrightnessFn = func() (*uint8, error) {
-			pct := uint8(50)
-			return &pct, nil
-		}
-		agent := &Agent{}
-		stats := system.Stats{Cpu: 4}
-		agent.updateBrightness(defaultDataCacheTimeMs, &stats)
-		assert.Nil(t, stats.Brightness, "the stats snapshot must not wait on DDC/CI")
-		assert.Equal(t, 4.0, stats.Cpu)
-		require.Eventually(t, func() bool {
-			agent.Lock()
-			defer agent.Unlock()
-			return agent.brightnessCached && agent.brightness != nil && *agent.brightness == 50 && !agent.brightnessProbe.Load()
-		}, time.Second, 10*time.Millisecond)
-
-		externalBrightnessFn = func() (*uint8, error) {
-			t.Error("short interval must reuse the cached reading")
-			return nil, errors.New("again")
-		}
-		stats = system.Stats{}
-		agent.updateBrightness(1000, &stats)
-		require.NotNil(t, stats.Brightness)
-		assert.Equal(t, uint8(50), *stats.Brightness)
-	})
-
 	t.Run("external panic stays in the probe", func(t *testing.T) {
-		t.Setenv("BRIGHTNESS", "true")
+		t.Setenv("BRIGHTNESS_SOURCE", "ddc")
+		ddcutilAvailableFn = func() bool { return true }
 		platformBrightnessFn = func() *uint8 { return nil }
 		externalBrightnessFn = func() (*uint8, error) { panic("ddc") }
 		agent := &Agent{}
 		stats := system.Stats{Cpu: 6}
 		assert.NotPanics(t, func() {
-			agent.updateBrightness(defaultDataCacheTimeMs, &stats)
+			agent.updateBrightness(&stats)
 		})
 		assert.Equal(t, 6.0, stats.Cpu)
 		require.Eventually(t, func() bool {
-			agent.Lock()
-			defer agent.Unlock()
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
 			return agent.brightnessCached && agent.brightness == nil && !agent.brightnessProbe.Load()
 		}, time.Second, 10*time.Millisecond)
 	})
+}
 
-	t.Run("external error stays absent", func(t *testing.T) {
-		t.Setenv("BRIGHTNESS", "true")
-		platformBrightnessFn = func() *uint8 { return nil }
-		externalBrightnessFn = func() (*uint8, error) { return nil, errors.New("ddc failed") }
-		agent := &Agent{}
-		stats := system.Stats{Cpu: 8}
-		agent.updateBrightness(defaultDataCacheTimeMs, &stats)
-		assert.Equal(t, 8.0, stats.Cpu)
-		require.Eventually(t, func() bool {
-			agent.Lock()
-			defer agent.Unlock()
-			return agent.brightnessCached && agent.brightness == nil && !agent.brightnessProbe.Load()
-		}, time.Second, 10*time.Millisecond)
-	})
+// atomicInt is a tiny counter for tests. The agent package's race-detector run
+// shares the probe function across goroutines.
+type atomicInt struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (a *atomicInt) add() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.n++
+	return a.n
+}
+
+func (a *atomicInt) value() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.n
 }
 
 func writeBacklight(t *testing.T, root, name, kind, current, max string) {
