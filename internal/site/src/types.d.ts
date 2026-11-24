@@ -98,6 +98,16 @@ export interface SystemInfo {
 	pu?: [number, number?]
 	/** screen brightness percent (0-100); omitted when unreadable */
 	br?: number
+	/** connected display size, e.g. 1080x1920 */
+	res?: string
+	/** portrait or landscape, with rotation when known */
+	ori?: string
+	/** ss-app package version */
+	ssa?: string
+	/** ss-iot package version */
+	ssi?: string
+	/** OS PRETTY_NAME */
+	osr?: string
 }
 
 export interface SystemStats {

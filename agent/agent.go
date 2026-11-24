@@ -49,6 +49,9 @@ type Agent struct {
 	brightnessCached          bool                                                  // A probe has finished since startup
 	brightnessAt              time.Time                                             // When the cache was last updated
 	brightnessProbe           atomic.Bool                                           // A DDC probe is running; only one is allowed
+	fleet                     fleetSnapshot                                         // Last screen and app-version reading
+	fleetAt                   time.Time                                             // When fleet was last refreshed
+	fleetCached               bool                                                  // fleet has been collected at least once
 	systemDetails             system.Details                                        // Host system details (static, once-per-connection)
 	detailsDirty              bool                                                  // Whether system details have changed and need to be resent
 	gpuManager                *GPUManager                                           // Manages GPU data

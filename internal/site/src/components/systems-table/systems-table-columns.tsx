@@ -13,7 +13,11 @@ import {
 	HardDriveIcon,
 	MemoryStickIcon,
 	PackageIcon,
+	AppWindowIcon,
+	MonitorIcon,
+	RadioIcon,
 	ServerIcon,
+	SmartphoneIcon,
 	SunMediumIcon,
 	TerminalSquareIcon,
 	WifiIcon,
@@ -89,7 +93,16 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 				// match filter value against name or translated status
 				return (row, _, newFilterInput) => {
 					const sys = row.original
-					if (sys.host.includes(newFilterInput) || sys.info.v?.includes(newFilterInput)) {
+					if (
+						sys.host.includes(newFilterInput) ||
+						sys.info.v?.includes(newFilterInput) ||
+						sys.info.res?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						sys.info.ori?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						sys.info.ssa?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						sys.info.ssi?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						sys.info.osr?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						sys.info.k?.toLowerCase().includes(newFilterInput.toLowerCase())
+					) {
 						return true
 					}
 					if (newFilterInput !== filterInput) {
@@ -327,6 +340,36 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 				return <span className="tabular-nums whitespace-nowrap">{pct}%</span>
 			},
 		},
+		textColumn(
+			"resolution",
+			() => t`Resolution`,
+			({ info }) => info.res,
+			MonitorIcon
+		),
+		textColumn(
+			"orientation",
+			() => t`Orientation`,
+			({ info }) => info.ori,
+			SmartphoneIcon
+		),
+		textColumn(
+			"ssApp",
+			() => "ss-app",
+			({ info }) => info.ssa,
+			AppWindowIcon
+		),
+		textColumn(
+			"ssIot",
+			() => "ss-iot",
+			({ info }) => info.ssi,
+			RadioIcon
+		),
+		textColumn(
+			"os",
+			() => t`OS`,
+			({ info }) => [info.osr, info.k].filter(Boolean).join(" · ") || undefined,
+			ServerIcon
+		),
 		{
 			accessorFn: primaryWiFiSignal,
 			id: "wifi",
@@ -541,7 +584,6 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 		},
 		{
 			id: "actions",
-			// @ts-expect-error
 			name: () => t({ message: "Actions", comment: "Table column" }),
 			size: 50,
 			cell: ({ row }) => (
@@ -552,6 +594,30 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 			),
 		},
 	] as ColumnDef<SystemRecord>[]
+}
+
+function textColumn(
+	id: string,
+	name: () => string,
+	value: (record: SystemRecord) => string | undefined,
+	Icon: React.ElementType
+) {
+	return {
+		accessorFn: (record) => value(record) || undefined,
+		id,
+		name,
+		size: 90,
+		Icon,
+		header: sortableHeader,
+		sortUndefined: "last",
+		cell(info) {
+			const text = info.getValue() as string | undefined
+			if (!text) {
+				return null
+			}
+			return <span className="whitespace-nowrap truncate max-w-44">{text}</span>
+		},
+	} as ColumnDef<SystemRecord>
 }
 
 function sortableHeader(context: HeaderContext<SystemRecord, unknown>) {
