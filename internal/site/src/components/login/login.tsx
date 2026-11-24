@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { UserAuthForm } from "@/components/login/auth-form"
 import { pb } from "@/lib/api"
 import { $authenticated } from "@/lib/stores"
-import { Logo } from "../logo"
+import { Logo, productName } from "../logo"
 import { ModeToggle } from "../mode-toggle"
 import { $router } from "../router"
 import { useTheme } from "../theme-provider"
@@ -23,7 +23,7 @@ export default function () {
 		const controller = new AbortController()
 		const autoLogin = !!globalThis.BESZEL.AUTO_LOGIN
 		// keep the title neutral while automatic authentication may still succeed
-		document.title = autoLogin ? "Beszel" : `${t`Login`} / Beszel`
+		document.title = autoLogin ? productName : `${t`Login`} / ${productName}`
 		loadLogin(
 			pb,
 			{
@@ -40,7 +40,7 @@ export default function () {
 					$authenticated.set(true)
 					return
 				}
-				document.title = `${t`Login`} / Beszel`
+				document.title = `${t`Login`} / ${productName}`
 				setLogin(result)
 			})
 			.catch((error) => {

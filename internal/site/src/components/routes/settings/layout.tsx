@@ -12,6 +12,7 @@ import {
 	SettingsIcon,
 } from "lucide-react"
 import { lazy, useEffect } from "react"
+import { productName } from "@/components/logo"
 import { $router } from "@/components/router.tsx"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card.tsx"
 import { toast } from "@/components/ui/use-toast.ts"
@@ -108,7 +109,7 @@ export default function SettingsLayout() {
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: no dependencies
 	useEffect(() => {
-		document.title = `${t`Settings`} / Beszel`
+		document.title = `${t`Settings`} / ${productName}`
 		// @ts-expect-error redirect to account page if no page is specified
 		if (!page?.params?.name) {
 			redirectPage($router, "settings", { name: "general" })

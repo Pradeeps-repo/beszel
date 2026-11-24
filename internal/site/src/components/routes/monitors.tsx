@@ -2,6 +2,7 @@ import { useLingui } from "@lingui/react/macro"
 import { memo, useEffect } from "react"
 import NetworkMonitorsTableNew from "@/components/network-monitors-table/network-monitors-table"
 import { FooterRepoLink } from "@/components/footer-repo-link"
+import { productName } from "@/components/logo"
 import { useNetworkMonitors } from "@/lib/use-network-monitors"
 import { $allSystemsById } from "@/lib/stores"
 import { supportsNetworkMonitors } from "@/lib/utils"
@@ -17,7 +18,7 @@ export default memo(() => {
 	})
 
 	useEffect(() => {
-		document.title = `${t`Network Monitors`} / Beszel`
+		document.title = `${t`Network Monitors`} / ${productName}`
 	}, [t])
 
 	return (

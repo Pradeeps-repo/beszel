@@ -23,7 +23,16 @@ export function FooterRepoLink() {
 				className="text-muted-foreground hover:text-foreground duration-75"
 				rel="noopener"
 			>
-				Beszel {globalThis.BESZEL.HUB_VERSION}
+				Bright Watch {globalThis.BESZEL.HUB_VERSION}
+			</a>
+			<Separator orientation="vertical" className="h-2.5 bg-muted-foreground opacity-70" />
+			<a
+				href="https://github.com/henrygd/beszel"
+				target="_blank"
+				className="text-muted-foreground hover:text-foreground duration-75"
+				rel="noopener"
+			>
+				Based on Beszel
 			</a>
 			{newVersion?.v && (
 				<>
