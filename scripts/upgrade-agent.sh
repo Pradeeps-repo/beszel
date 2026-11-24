@@ -342,6 +342,7 @@ self_test() {
   if ! BRIGHT_WATCH_DDC_PERCENT="$percent" runuser -u "$user" -- env BRIGHT_WATCH_DDC_PERCENT="$percent" "$HELPER_PATH" --print; then
     log "  could not read /run/bright-watch as ${user}"
   fi
+  log "  auth is the X authority the root helper used; an absent orientation means every candidate was refused"
 }
 
 download_verified() {

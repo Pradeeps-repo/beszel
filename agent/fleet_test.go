@@ -74,6 +74,14 @@ func TestParseXrandr(t *testing.T) {
 	assert.Equal(t, "1920x1080", snap.Mode)
 	assert.Equal(t, "portrait (90°)", snap.Orientation)
 
+	xwayland := "XWAYLAND0 connected 1080x1920+0+0 (normal left inverted right x axis y axis) 340mm x 620mm\n"
+	snap = parseXrandr(xwayland)
+	assert.Equal(t, "XWAYLAND0", snap.Output)
+	assert.Equal(t, "1080x1920", snap.Resolution)
+	assert.Equal(t, "1080x1920", snap.Mode, "XWayland geometry is the current resolution when there is no starred mode")
+	assert.Equal(t, "portrait", snap.Orientation)
+	assert.NotContains(t, snap.Orientation, "°")
+
 	normal := "eDP-1 connected 1920x1080+0+0 normal (normal left inverted right)\n"
 	snap = parseXrandr(normal)
 	assert.Equal(t, "1920x1080", snap.Resolution)
