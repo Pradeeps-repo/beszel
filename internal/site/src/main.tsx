@@ -19,6 +19,7 @@ import {
 	$copyContent,
 	$direction,
 	$newVersion,
+	$agentLatest,
 	$publicKey,
 	$userSettings,
 	defaultLayoutWidth,
@@ -46,6 +47,9 @@ const App = memo(() => {
 		// get general info for authenticated users, such as public key and version
 		pb.send<BeszelInfo>("/api/beszel/info", {}).then((data) => {
 			$publicKey.set(data.key)
+			if (data.agentLatest) {
+				$agentLatest.set(data.agentLatest)
+			}
 			// check for updates if enabled
 			if (data.cu && isAdmin()) {
 				pb.send<UpdateInfo>("/api/beszel/update", {}).then($newVersion.set)

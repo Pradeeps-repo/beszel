@@ -216,6 +216,9 @@ func (h *Hub) registerApiRoutes(se *core.ServeEvent) error {
 	apiAuth.POST("/smart/refresh", h.refreshSmartData).BindFunc(excludeReadOnlyRole)
 	// refresh ZFS pool details for a system
 	apiAuth.POST("/zfs/refresh", h.refreshZfsData).BindFunc(excludeReadOnlyRole)
+	apiAuth.GET("/agent-updates", h.getAgentUpdates).BindFunc(requireAdminRole)
+	apiAuth.PUT("/agent-updates/settings", h.putAgentUpdateSettings).BindFunc(requireAdminRole)
+	apiAuth.POST("/agent-updates", h.postAgentUpdates).BindFunc(requireAdminRole)
 	// get systemd service details
 	apiAuth.GET("/systemd/info", h.getSystemdInfo)
 	// get recent logs for a systemd service
@@ -242,13 +245,19 @@ func (h *Hub) getInfo(e *core.RequestEvent) error {
 		Key         string `json:"key"`
 		Version     string `json:"v"`
 		CheckUpdate bool   `json:"cu"`
+		AgentLatest string `json:"agentLatest,omitempty"`
+		AgentCommit string `json:"agentCommit,omitempty"`
 	}
 	h.sshKeyMu.Lock()
 	pubKey := h.pubKey
 	h.sshKeyMu.Unlock()
+	latest, commit := h.cachedAgentRelease()
+	go h.refreshAgentRelease(false)
 	info := infoResponse{
-		Key:     pubKey,
-		Version: beszel.Version,
+		Key:         pubKey,
+		Version:     beszel.Version,
+		AgentLatest: latest,
+		AgentCommit: commit,
 	}
 	if optIn, _ := utils.GetEnv("CHECK_UPDATES"); optIn == "true" {
 		info.CheckUpdate = true

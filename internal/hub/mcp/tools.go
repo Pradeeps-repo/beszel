@@ -36,7 +36,7 @@ func registerTools(app core.App, server *mcpsdk.Server) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "list_systems",
 		Description: "List monitored systems visible to the authenticated user. " +
-			"Filter by status (up, down, paused), name substring, pending package name, ss-app or ss-iot version (eq, lt, gt), orientation, resolution, and brightness range. " +
+			"Filter by status (up, down, paused), name substring, pending package name, agent version (eq, lt, gt), ss-app or ss-iot version (eq, lt, gt), orientation, resolution, and brightness range. " +
 			"Returns name, host, status, last seen, fleet fields (brightness, resolution, mode, orientation, os, kernel, ss-app, ss-iot) and CPU, memory and disk percentages. " +
 			"Results are paginated: limit defaults to 200 and cannot exceed 200, offset skips that many matches.",
 	}, h.listSystems)
@@ -117,30 +117,33 @@ func registerTools(app core.App, server *mcpsdk.Server) {
 // output types
 
 type systemSummary struct {
-	Id           string              `json:"id"`
-	Name         string              `json:"name"`
-	Host         string              `json:"host,omitempty"`
-	Status       string              `json:"status"`
-	Cpu          float64             `json:"cpu_pct,omitzero"`
-	Mem          float64             `json:"memory_pct,omitzero"`
-	Disk         float64             `json:"disk_pct,omitzero"`
-	Bandwidth    *uint64             `json:"bandwidth_bps,omitzero"` // aggregate bytes/sec
-	Temp         float64             `json:"temp_c,omitzero"`        // highest sensor temperature, or the agent's PRIMARY_SENSOR if set
-	LoadAvg      *[3]float64         `json:"load_avg,omitzero"`
-	Updates      *updatesInfo        `json:"updates,omitempty"` // pending package updates
-	Battery      *batteryInfo        `json:"battery,omitempty"`
-	WiFi         map[string]wifiInfo `json:"wifi,omitempty"` // connected Wi-Fi interfaces by OS interface name
-	AgentVersion string              `json:"agent_version,omitzero"`
-	Uptime       uint64              `json:"uptime_seconds,omitzero"`
-	LastSeen     string              `json:"last_seen,omitzero"` // RFC3339
-	Brightness   *uint8              `json:"brightness_pct,omitempty"`
-	Resolution   string              `json:"resolution,omitempty"`
-	Mode         string              `json:"mode,omitempty"`
-	Orientation  string              `json:"orientation,omitempty"`
-	Os           string              `json:"os,omitempty"`
-	Kernel       string              `json:"kernel,omitempty"`
-	SsApp        string              `json:"ss_app,omitempty"`
-	SsIot        string              `json:"ss_iot,omitempty"`
+	Id               string              `json:"id"`
+	Name             string              `json:"name"`
+	Host             string              `json:"host,omitempty"`
+	Status           string              `json:"status"`
+	Cpu              float64             `json:"cpu_pct,omitzero"`
+	Mem              float64             `json:"memory_pct,omitzero"`
+	Disk             float64             `json:"disk_pct,omitzero"`
+	Bandwidth        *uint64             `json:"bandwidth_bps,omitzero"` // aggregate bytes/sec
+	Temp             float64             `json:"temp_c,omitzero"`        // highest sensor temperature, or the agent's PRIMARY_SENSOR if set
+	LoadAvg          *[3]float64         `json:"load_avg,omitzero"`
+	Updates          *updatesInfo        `json:"updates,omitempty"` // pending package updates
+	Battery          *batteryInfo        `json:"battery,omitempty"`
+	WiFi             map[string]wifiInfo `json:"wifi,omitempty"` // connected Wi-Fi interfaces by OS interface name
+	AgentVersion     string              `json:"agent_version,omitzero"`
+	AgentCommit      string              `json:"agent_commit,omitempty"`
+	AgentUpdate      string              `json:"agent_update,omitempty"`
+	AgentUpdateError string              `json:"agent_update_error,omitempty"`
+	Uptime           uint64              `json:"uptime_seconds,omitzero"`
+	LastSeen         string              `json:"last_seen,omitzero"` // RFC3339
+	Brightness       *uint8              `json:"brightness_pct,omitempty"`
+	Resolution       string              `json:"resolution,omitempty"`
+	Mode             string              `json:"mode,omitempty"`
+	Orientation      string              `json:"orientation,omitempty"`
+	Os               string              `json:"os,omitempty"`
+	Kernel           string              `json:"kernel,omitempty"`
+	SsApp            string              `json:"ss_app,omitempty"`
+	SsIot            string              `json:"ss_iot,omitempty"`
 }
 
 // updatesInfo describes pending package updates reported by the agent
@@ -297,6 +300,7 @@ func newSystemSummary(record *core.Record) systemSummary {
 		s.Mem = info.MemPct
 		s.Disk = info.DiskPct
 		s.AgentVersion = info.AgentVersion
+		s.AgentCommit = info.Commit
 		s.Temp = info.DashboardTemp
 		s.Uptime = info.Uptime
 		if info.BandwidthBytes > 0 {
@@ -336,6 +340,14 @@ func newSystemSummary(record *core.Record) systemSummary {
 			}
 		}
 	}
+	var agentState struct {
+		State string `json:"state"`
+		Error string `json:"error"`
+	}
+	if record.UnmarshalJSONField("agent_update", &agentState) == nil {
+		s.AgentUpdate = agentState.State
+		s.AgentUpdateError = agentState.Error
+	}
 	if updated := record.GetDateTime("updated"); !updated.IsZero() {
 		s.LastSeen = updated.Time().UTC().Format(time.RFC3339)
 	}
@@ -355,6 +367,7 @@ type listSystemsParams struct {
 	BrightnessMin *int           `json:"brightness_min,omitempty" jsonschema:"minimum brightness percent, inclusive"`
 	BrightnessMax *int           `json:"brightness_max,omitempty" jsonschema:"maximum brightness percent, inclusive"`
 	Package       string         `json:"package,omitempty" jsonschema:"only systems with a pending package whose name contains this text"`
+	AgentVersion  *versionFilter `json:"agent_version,omitempty" jsonschema:"agent build filter with eq, lt and/or gt, for example 0.21.2-bw.12"`
 	Limit         int            `json:"limit,omitempty" jsonschema:"page size, default 200, maximum 200"`
 	Offset        int            `json:"offset,omitempty" jsonschema:"number of matching systems to skip"`
 }

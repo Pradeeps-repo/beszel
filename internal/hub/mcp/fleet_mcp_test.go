@@ -104,6 +104,31 @@ func TestFleetSummaryAndAlerts(t *testing.T) {
 	require.Equal(t, "CPU", alerts["history"].([]any)[0].(map[string]any)["name"])
 }
 
+func TestMcpAgentVersionFilterAndUpdateStatus(t *testing.T) {
+	hub, user, _, server, userSystem := setupHub(t)
+	session := mcpClient(t, server.URL, user.Token)
+	system := hubFindSystem(t, hub, userSystem.Id)
+	system.Set("info", map[string]any{"v": "0.21.2-bw.4+abc", "bc": "abc"})
+	system.Set("agent_update", map[string]any{"state": "failed", "error": "sha256 mismatch"})
+	require.NoError(t, hub.Save(system))
+	other := findSystemByName(t, hub, "user-system-2")
+	other.Set("info", map[string]any{"v": "0.21.2"})
+	require.NoError(t, hub.Save(other))
+
+	data := callTool(t, session, "list_systems", map[string]any{
+		"agent_version": map[string]any{"gt": "0.21.2", "lt": "0.21.2-bw.10"},
+	})
+	require.Equal(t, float64(1), data["count"])
+	row := data["systems"].([]any)[0].(map[string]any)
+	require.Equal(t, "0.21.2-bw.4+abc", row["agent_version"])
+	require.Equal(t, "abc", row["agent_commit"])
+	require.Equal(t, "failed", row["agent_update"])
+	require.Equal(t, "sha256 mismatch", row["agent_update_error"])
+
+	detail := callTool(t, session, "get_system", map[string]any{"system": "user-system-1"})
+	require.Equal(t, "failed", detail["agent_update"])
+}
+
 func TestMcpTokenAuth(t *testing.T) {
 	t.Setenv("BESZEL_HUB_MCP", "")
 	t.Setenv("MCP", "")

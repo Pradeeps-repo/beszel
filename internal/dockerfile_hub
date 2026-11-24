@@ -17,10 +17,14 @@ RUN update-ca-certificates
 
 # Build
 ARG TARGETOS TARGETARCH TARGETVARIANT
+ARG BESZEL_VERSION=0.21.2
+ARG BESZEL_COMMIT=
 RUN if [ "$TARGETARCH" = "arm" ] && [ -n "$TARGETVARIANT" ]; then \
     export GOARM="${TARGETVARIANT#v}"; \
   fi; \
-  CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags "-w -s" -o /beszel ./internal/cmd/hub
+  CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+    -ldflags "-w -s -X github.com/henrygd/beszel.Version=${BESZEL_VERSION} -X github.com/henrygd/beszel.Commit=${BESZEL_COMMIT}" \
+    -o /beszel ./internal/cmd/hub
 
 # ? -------------------------
 FROM scratch

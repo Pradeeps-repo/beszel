@@ -59,7 +59,10 @@ jobs:
           GOARM: ${{ matrix.goarm }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w" -o "dist/${{ matrix.asset }}" ./internal/cmd/agent
+          base="$(awk -F'"' '/^[[:space:]]*Version = /{print $2; exit}' beszel.go)"
+          short="${GITHUB_SHA::7}"
+          version="${base}-bw.${GITHUB_RUN_NUMBER}+${short}"
+          go build -trimpath -ldflags "-s -w -X github.com/henrygd/beszel.Version=${version} -X github.com/henrygd/beszel.Commit=${short}" -o "dist/${{ matrix.asset }}" ./internal/cmd/agent
           (cd dist && sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256")
           # The checksum file is the contract scripts/upgrade-agent.sh verifies.
           (cd dist && sha256sum -c "${{ matrix.asset }}.sha256")
@@ -100,7 +103,11 @@ jobs:
         run: |
           set -euo pipefail
           tag=agent-latest
-          notes="Rolling static agent build from ${GITHUB_SHA}.
+          base="$(awk -F'"' '/^[[:space:]]*Version = /{print $2; exit}' beszel.go)"
+          short="${GITHUB_SHA::7}"
+          version="${base}-bw.${GITHUB_RUN_NUMBER}+${short}"
+          printf 'version=%s\ncommit=%s\n' "$version" "$short" > dist/beszel-agent_version
+          notes="Rolling static agent build ${version} from ${GITHUB_SHA}.
 
           Assets (replaced on every push to main):
           - beszel-agent_linux_amd64

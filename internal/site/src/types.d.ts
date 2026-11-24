@@ -32,6 +32,13 @@ export interface SystemRecord extends RecordModel {
 	info: SystemInfo
 	v: string
 	updated: string
+	agent_update?: {
+		state?: "pending" | "updating" | "done" | "failed" | "rolled_back" | ""
+		error?: string
+		target?: string
+		at?: string
+		forced?: boolean
+	}
 }
 
 export interface WiFi {
@@ -76,6 +83,8 @@ export interface SystemInfo {
 	bb?: number
 	/** agent version */
 	v: string
+	/** agent build commit */
+	bc?: string
 	/** agent can read the system journal */
 	jl?: boolean
 	/** system is using podman */
@@ -698,6 +707,8 @@ export interface BeszelInfo {
 	key: string // public key
 	v: string // version
 	cu: boolean // check updates
+	agentLatest?: string
+	agentCommit?: string
 }
 
 export interface UpdateInfo {

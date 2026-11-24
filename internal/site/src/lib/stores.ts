@@ -30,6 +30,9 @@ export const $alerts = map<AlertMap>({})
 /** SSH public key */
 export const $publicKey = atom("")
 
+/** Newest published agent build, stamped like 0.21.2-bw.12+abc. */
+export const $agentLatest = atom("")
+
 /** New version info if an update is available, otherwise undefined */
 export const $newVersion = atom<UpdateInfo | undefined>()
 

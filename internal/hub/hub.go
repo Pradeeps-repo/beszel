@@ -2,6 +2,7 @@
 package hub
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/pem"
 	"errors"
@@ -36,10 +37,11 @@ type Hub struct {
 	hb     *heartbeat.Heartbeat
 	hbStop chan struct{}
 	// sshKeyMu guards pubKey and signer
-	sshKeyMu sync.Mutex
-	pubKey   string
-	signer   ssh.Signer
-	appURL   string
+	sshKeyMu     sync.Mutex
+	pubKey       string
+	signer       ssh.Signer
+	appURL       string
+	agentRelease agentReleaseCache
 }
 
 // NewHub creates a new Hub instance with default configuration
@@ -154,6 +156,9 @@ func (h *Hub) registerCronJobs(_ *core.ServeEvent) error {
 	h.Cron().MustAdd("delete old records", "8 * * * *", h.rm.DeleteOldRecords)
 	// create longer records every 10 minutes
 	h.Cron().MustAdd("create longer records", "*/10 * * * *", h.rm.CreateLongerRecords)
+	h.Cron().MustAdd("dispatch agent updates", "* * * * *", func() {
+		h.dispatchAgentUpdates(context.Background())
+	})
 	return nil
 }
 

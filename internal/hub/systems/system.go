@@ -716,6 +716,14 @@ func (sys *System) getContext(ctx context.Context) (context.Context, context.Can
 
 // request sends a request to the agent, trying WebSocket first, then SSH.
 // This is the unified request method that uses the transport abstraction.
+// RequestAgentUpdate asks the connected agent to install a release.
+// The version is the only instruction. The agent chooses the download URL.
+func (sys *System) RequestAgentUpdate(ctx context.Context, version, commit string) (common.AgentUpdateResponse, error) {
+	var response common.AgentUpdateResponse
+	err := sys.request(ctx, common.ApplyAgentUpdate, common.AgentUpdateRequest{Version: version, Commit: commit}, &response)
+	return response, err
+}
+
 func (sys *System) request(ctx context.Context, action common.WebSocketAction, req any, dest any) error {
 	// Try WebSocket first
 	if sys.WsConn != nil && sys.WsConn.IsConnected() {

@@ -34,7 +34,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
-import { isReadOnlyUser, pb } from "@/lib/api"
+import { isAdmin, isReadOnlyUser, pb } from "@/lib/api"
 import { SystemStatus } from "@/lib/enums"
 import { $alerts } from "@/lib/stores"
 import { cn, copyToClipboard } from "@/lib/utils"
@@ -70,6 +70,7 @@ type ActionsButtonProps = {
 
 export const ActionsButton = memo(({ system, variant = "ghost", showAlerts = false }: ActionsButtonProps) => {
 	const [deleteOpen, setDeleteOpen] = useState(false)
+	const [updateOpen, setUpdateOpen] = useState(false)
 	const [editOpen, setEditOpen] = useState(false)
 	const editOpened = useRef(false)
 	const [alertsOpen, setAlertsOpen] = useState(false)
@@ -141,6 +142,12 @@ export const ActionsButton = memo(({ system, variant = "ghost", showAlerts = fal
 							<CopyIcon className="me-2.5 size-4" />
 							<Trans>Copy host</Trans>
 						</DropdownMenuItem>
+						{isAdmin() && (
+							<DropdownMenuItem onSelect={() => setUpdateOpen(true)}>
+								<PlayCircleIcon className="me-2.5 size-4" />
+								<Trans>Update now</Trans>
+							</DropdownMenuItem>
+						)}
 						<DropdownMenuSeparator className={cn(isReadOnlyUser() && "hidden")} />
 						<DropdownMenuItem className={cn(isReadOnlyUser() && "hidden")} onSelect={() => setDeleteOpen(true)}>
 							<Trash2Icon className="me-2.5 size-4" />
@@ -156,6 +163,36 @@ export const ActionsButton = memo(({ system, variant = "ghost", showAlerts = fal
 						</SheetContent>
 					</Sheet>
 				)}
+				<AlertDialog open={updateOpen} onOpenChange={setUpdateOpen}>
+					<AlertDialogContent>
+						<AlertDialogHeader>
+							<AlertDialogTitle>
+								<Trans>Update {name} now?</Trans>
+							</AlertDialogTitle>
+							<AlertDialogDescription>
+								<Trans>
+									This installs the target agent build immediately. It still checks sha256, keeps a backup, and
+									rolls back if the new version does not stay healthy.
+								</Trans>
+							</AlertDialogDescription>
+						</AlertDialogHeader>
+						<AlertDialogFooter>
+							<AlertDialogCancel>
+								<Trans>Cancel</Trans>
+							</AlertDialogCancel>
+							<AlertDialogAction
+								onClick={() => {
+									void pb.send("/api/beszel/agent-updates", {
+										method: "POST",
+										body: { force: true, systems: [id] },
+									})
+								}}
+							>
+								<Trans>Update now</Trans>
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialog>
 				{/* edit dialog */}
 				<Dialog open={editOpen} onOpenChange={setEditOpen}>
 					{editOpened.current && <SystemDialog system={system} setOpen={setEditOpen} />}

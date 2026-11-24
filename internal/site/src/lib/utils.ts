@@ -429,6 +429,29 @@ export const parseSemVer = (semVer = ""): SemVer => {
 }
 
 /** Compare two semver strings. Returns -1 if a is less than b, 0 if a is equal to b, and 1 if a is greater than b. */
+/** Compare fleet build stamps such as 0.21.2-bw.12+abc. A stamped build is newer than plain 0.21.2. */
+export function compareFleetVersion(a = "", b = "") {
+	const parse = (value: string) => {
+		const core = value.trim().replace(/^v/, "").split("+")[0] ?? ""
+		const [nums, pre] = core.split("-")
+		const [major, minor, patch] = (nums ?? "").split(".").map((part) => Number(part) || 0)
+		const bw = pre?.startsWith("bw.") ? Number(pre.slice(3).split(".")[0]) : null
+		return { major, minor, patch, bw, ok: (nums ?? "").split(".").length >= 3 }
+	}
+	const left = parse(a)
+	const right = parse(b)
+	if (!left.ok && !right.ok) return a.localeCompare(b)
+	if (!left.ok) return -1
+	if (!right.ok) return 1
+	if (left.major !== right.major) return left.major - right.major
+	if (left.minor !== right.minor) return left.minor - right.minor
+	if (left.patch !== right.patch) return left.patch - right.patch
+	if (left.bw === right.bw) return 0
+	if (left.bw === null) return -1
+	if (right.bw === null) return 1
+	return left.bw - right.bw
+}
+
 export function compareSemVer(a: SemVer, b: SemVer) {
 	if (a.major !== b.major) {
 		return a.major - b.major

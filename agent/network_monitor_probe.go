@@ -15,7 +15,7 @@ import (
 	"github.com/henrygd/beszel/internal/entities/monitor"
 )
 
-const networkMonitorUserAgent = "Beszel-Agent/" + beszel.Version + " (+https://beszel.dev)"
+var networkMonitorUserAgent = "Beszel-Agent/" + beszel.Version + " (+https://beszel.dev)"
 
 // monitorProbe performs one check. Errors are recorded as loss by the task runner.
 // Implementations must honor cancellation and bound their execution time.
