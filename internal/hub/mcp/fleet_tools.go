@@ -32,6 +32,9 @@ func fleetRecordMatches(record *core.Record, params listSystemsParams) bool {
 	if !versionMatches(info.SsApp, params.SsApp) || !versionMatches(info.SsIot, params.SsIot) {
 		return false
 	}
+	if pkg := strings.TrimSpace(params.Package); pkg != "" && !systemHasPackage(record, pkg) {
+		return false
+	}
 	if params.BrightnessMin != nil || params.BrightnessMax != nil {
 		if info.Brightness == nil {
 			return false

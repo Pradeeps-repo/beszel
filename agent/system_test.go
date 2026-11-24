@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/henrygd/beszel/internal/common"
 	"github.com/henrygd/beszel/internal/entities/system"
@@ -35,6 +37,39 @@ func TestGatherStatsDoesNotAttachDetailsToCachedRequests(t *testing.T) {
 	secondResponse := agent.gatherStats(common.DataRequestOptions{CacheTimeMs: defaultDataCacheTimeMs})
 	assert.Same(t, cached, secondResponse)
 	assert.Nil(t, secondResponse.Details)
+}
+
+func TestAttachPackageUpdates(t *testing.T) {
+	pm := &packageUpdatesManager{
+		name:     "apt",
+		interval: time.Hour,
+		result: packageUpdatesResult{
+			counts:        []uint16{1, 1},
+			securityKnown: true,
+			packages: []system.PackageUpdate{{
+				Name: "openssl", Current: "3.0.2", Available: "3.0.13", Security: true,
+			}},
+		},
+		checkedAt: time.Now(),
+	}
+	data := &system.CombinedData{}
+	attachPackageUpdates(data, pm, time.Now())
+	require.NotNil(t, data.PackageUpdates)
+	require.Equal(t, "openssl", data.PackageUpdates.Packages[0].Name)
+	require.Equal(t, "3.0.13", data.PackageUpdates.Packages[0].Available)
+	require.True(t, data.PackageUpdates.Packages[0].Security)
+	require.Equal(t, []uint16{1, 1}, data.Info.PackageUpdates)
+
+	unchecked := &system.CombinedData{}
+	attachPackageUpdates(unchecked, &packageUpdatesManager{
+		interval: time.Hour,
+		check: func(context.Context) (packageUpdatesResult, error) {
+			return packageUpdatesResult{}, nil
+		},
+	}, time.Now())
+	require.Nil(t, unchecked.PackageUpdates)
+	attachPackageUpdates(unchecked, nil, time.Now())
+	require.Nil(t, unchecked.PackageUpdates)
 }
 
 func TestCalculateHostMemoryUsage(t *testing.T) {

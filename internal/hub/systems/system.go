@@ -344,6 +344,11 @@ func (sys *System) createRecords(data *system.CombinedData) (*core.Record, error
 			info.GpuPct = &data.Info.GpuPct
 		}
 		systemRecord.Set("info", info)
+		// Nil keeps a list stored by an older agent. A completed check replaces it,
+		// including when that check found no pending packages.
+		if data.PackageUpdates != nil {
+			systemRecord.Set("package_updates", data.PackageUpdates)
+		}
 		if err := txApp.SaveNoValidate(systemRecord); err != nil {
 			return err
 		}

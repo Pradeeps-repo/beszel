@@ -262,9 +262,7 @@ func (a *Agent) gatherStats(options common.DataRequestOptions) *system.CombinedD
 		}
 	}
 
-	if a.packageUpdates != nil {
-		data.Info.PackageUpdates = a.packageUpdates.get(time.Now())
-	}
+	attachPackageUpdates(data, a.packageUpdates, time.Now())
 
 	data.Stats.ExtraFs = make(map[string]*system.FsStats)
 	data.Info.ExtraFsPct = make(map[string]float64)

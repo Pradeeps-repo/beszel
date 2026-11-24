@@ -36,13 +36,13 @@ func registerTools(app core.App, server *mcpsdk.Server) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "list_systems",
 		Description: "List monitored systems visible to the authenticated user. " +
-			"Filter by status (up, down, paused), name substring, ss-app or ss-iot version (eq, lt, gt), orientation, resolution, and brightness range. " +
+			"Filter by status (up, down, paused), name substring, pending package name, ss-app or ss-iot version (eq, lt, gt), orientation, resolution, and brightness range. " +
 			"Returns name, host, status, last seen, fleet fields (brightness, resolution, mode, orientation, os, kernel, ss-app, ss-iot) and CPU, memory and disk percentages. " +
 			"Results are paginated: limit defaults to 200 and cannot exceed 200, offset skips that many matches.",
 	}, h.listSystems)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "get_system",
-		Description: "Get hardware details, fleet fields, and the latest stats (temperatures, GPUs, fans) for one system, looked up by name or id.",
+		Description: "Get hardware details, fleet fields, pending packages, and the latest stats (temperatures, GPUs, fans) for one system, looked up by name or id.",
 	}, h.getSystem)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "get_system_history",
@@ -103,6 +103,14 @@ func registerTools(app core.App, server *mcpsdk.Server) {
 		Description: "List network endpoint monitors (ping/tcp/http/dns) with latest latency and loss. " +
 			"Omit system to list monitors of all visible systems; sort by latency or loss to find the worst endpoints.",
 	}, h.listNetworkMonitors)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name: "list_pending_packages",
+		Description: "Aggregate pending package updates across visible systems. " +
+			"Each row is one package name and candidate version, with how many systems need it and whether it is a security update. " +
+			"Filter by package name substring, security_only, os (matches the stored OS text), and system status. " +
+			"Results are paginated: limit defaults to 200 and cannot exceed 200, offset skips that many matches. " +
+			"Package names are stored from the agent cache. Agents that only report update counts have no rows here.",
+	}, h.listPendingPackages)
 }
 
 // ---------------------------------------------------------------------------
@@ -144,11 +152,12 @@ type updatesInfo struct {
 
 type systemDetail struct {
 	systemSummary
-	Port    string         `json:"port,omitempty"`
-	Gpu     float64        `json:"gpu_pct,omitzero"`
-	Current *systemCurrent `json:"current,omitempty"` // latest recorded sensor/usage detail
-	Created string         `json:"created,omitzero"`  // RFC3339
-	Server  *serverInfo    `json:"server,omitempty"`
+	Port     string          `json:"port,omitempty"`
+	Gpu      float64         `json:"gpu_pct,omitzero"`
+	Current  *systemCurrent  `json:"current,omitempty"` // latest recorded sensor/usage detail
+	Created  string          `json:"created,omitzero"`  // RFC3339
+	Server   *serverInfo     `json:"server,omitempty"`
+	Packages []packageDetail `json:"packages,omitempty"` // pending packages from the last agent check
 }
 
 // systemCurrent carries detailed current usage that is not needed in every
@@ -344,6 +353,7 @@ type listSystemsParams struct {
 	Resolution    string         `json:"resolution,omitempty" jsonschema:"exact logical resolution, for example 1080x1920"`
 	BrightnessMin *int           `json:"brightness_min,omitempty" jsonschema:"minimum brightness percent, inclusive"`
 	BrightnessMax *int           `json:"brightness_max,omitempty" jsonschema:"maximum brightness percent, inclusive"`
+	Package       string         `json:"package,omitempty" jsonschema:"only systems with a pending package whose name contains this text"`
 	Limit         int            `json:"limit,omitempty" jsonschema:"page size, default 200, maximum 200"`
 	Offset        int            `json:"offset,omitempty" jsonschema:"number of matching systems to skip"`
 }
@@ -430,6 +440,9 @@ func (h *mcphub) getSystem(ctx context.Context, req *mcpsdk.CallToolRequest, par
 	var info system.Info
 	if err := record.UnmarshalJSONField("info", &info); err == nil {
 		detail.Gpu = info.GpuPct
+	}
+	if packages := recordPackageUpdates(record).Packages; len(packages) > 0 {
+		detail.Packages = packageDetails(packages)
 	}
 	// detailed current metrics from the latest 1m system_stats record
 	if latest, err := h.app.FindRecordsByFilter("system_stats", "system = {:system} && type = {:type}", "-created", 1, 0,

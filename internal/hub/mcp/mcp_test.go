@@ -577,7 +577,7 @@ func TestMcpToolsList(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{
 		"list_systems", "get_system", "get_system_stats", "get_system_history", "get_container_stats", "list_containers", "list_alerts",
-		"fleet_summary", "list_alert_events", "list_services", "get_disk_health", "list_network_monitors",
+		"fleet_summary", "list_alert_events", "list_services", "get_disk_health", "list_network_monitors", "list_pending_packages",
 	}, names)
 }
 

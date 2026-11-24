@@ -145,8 +145,9 @@ func newServer(app core.App) *mcpsdk.Server {
 		Version: beszel.Version,
 	}, &mcpsdk.ServerOptions{
 		Instructions: "Beszel is a lightweight server monitoring hub. " +
-			"Use list_systems to filter systems (status, name, ss-app, ss-iot, orientation, resolution, brightness). " +
-			"get_system returns one system including sensors and GPUs. " +
+			"Use list_systems to filter systems (status, name, package, ss-app, ss-iot, orientation, resolution, brightness). " +
+			"get_system returns one system including sensors, GPUs and pending packages. " +
+			"list_pending_packages aggregates pending packages across the visible fleet. " +
 			"get_system_history returns cpu, memory, disk, temperature, network and brightness samples for 1h, 12h, 24h, 1w or 30d. " +
 			"fleet_summary counts the visible fleet. list_alerts returns alert rules and recent history. " +
 			"Data access matches the authenticated user, except the MCP_TOKEN bearer which can read the whole fleet.",

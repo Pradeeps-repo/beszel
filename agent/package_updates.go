@@ -94,6 +94,18 @@ func packageUpdatesInterval() (interval time.Duration, enabled bool) {
 	}
 }
 
+// attachPackageUpdates copies the cached counts onto the heartbeat and, once a
+// check has finished, the package names as well. A nil manager leaves both unset.
+func attachPackageUpdates(data *system.CombinedData, pm *packageUpdatesManager, now time.Time) {
+	if data == nil || pm == nil {
+		return
+	}
+	data.Info.PackageUpdates = pm.get(now)
+	if listed := pm.list(); listed.CheckedAt != 0 {
+		data.PackageUpdates = &listed
+	}
+}
+
 // get returns the last cached counts and starts a background check if they are stale.
 func (pm *packageUpdatesManager) get(now time.Time) []uint16 {
 	pm.Lock()
