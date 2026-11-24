@@ -25,7 +25,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 import { BatteryState, ConnectionType, connectionTypeLabels, MeterState, SystemStatus } from "@/lib/enums"
 import { $agentLatest, $userSettings } from "@/lib/stores"
-import { cn, compareFleetVersion, decimalString, formatBytes, formatTemperature, parseSemVer, secondsToUptimeString } from "@/lib/utils"
+import { cn, compareFleetVersion, decimalString, displayTokens, formatBytes, formatTemperature, labelTokens, parseSemVer, secondsToUptimeString } from "@/lib/utils"
 import { batteryStateTranslations } from "@/lib/i18n"
 import { connectedWiFi, primaryWiFi, primaryWiFiSignal, wifiNetworkName, wifiSignalState } from "@/lib/wifi"
 import type { SystemRecord, WiFi } from "@/types"
@@ -96,9 +96,9 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 					if (
 						sys.host.includes(newFilterInput) ||
 						sys.info.v?.includes(newFilterInput) ||
-						sys.info.res?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
-						sys.info.mod?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
-						sys.info.ori?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						displayTokens(sys.info.res).join(" ").toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						displayTokens(sys.info.mod).join(" ").toLowerCase().includes(newFilterInput.toLowerCase()) ||
+						(labelTokens(sys.info.ori)[0] ?? "").toLowerCase().includes(newFilterInput.toLowerCase()) ||
 						sys.info.ssa?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
 						sys.info.ssi?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
 						sys.info.osr?.toLowerCase().includes(newFilterInput.toLowerCase()) ||
@@ -344,13 +344,13 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 		textColumn(
 			"resolution",
 			() => t`Resolution`,
-			({ info }) => info.res,
+			({ info }) => displayTokens(info.res).join(", ") || undefined,
 			MonitorIcon
 		),
 		textColumn(
 			"orientation",
 			() => t`Orientation`,
-			({ info }) => info.ori,
+			({ info }) => labelTokens(info.ori)[0],
 			SmartphoneIcon
 		),
 		textColumn(

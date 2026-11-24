@@ -330,8 +330,8 @@ func (h *mcphub) fleetSummary(ctx context.Context, _ *mcpsdk.CallToolRequest, pa
 		summary.BySsApp[labelOrUnknown(info.SsApp)]++
 		summary.BySsIot[labelOrUnknown(info.SsIot)]++
 		summary.ByOs[labelOrUnknown(info.OsRelease)]++
-		summary.ByOrientation[orientationBucket(info.Orientation)]++
-		summary.ByResolution[labelOrUnknown(info.Screen)]++
+		summary.ByOrientation[orientationBucket(system.NormalizeLabel(info.Orientation))]++
+		summary.ByResolution[labelOrUnknown(system.NormalizeDisplay(info.Screen))]++
 		summary.ByBrightness[brightnessBucket(info.Brightness)]++
 		updated := record.GetDateTime("updated").Time()
 		if updated.IsZero() || updated.Before(cutoff) {

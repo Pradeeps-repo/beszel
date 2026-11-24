@@ -336,6 +336,9 @@ func (sys *System) createRecords(data *system.CombinedData) (*core.Record, error
 		// update system record (do this last because it triggers alerts and we need above records to be inserted first)
 		systemRecord.Set("status", up)
 		// Distinguish an idle GPU from a system without GPU data (#2312)
+		data.Info.Screen = system.NormalizeDisplay(data.Info.Screen)
+		data.Info.Mode = system.NormalizeDisplay(data.Info.Mode)
+		data.Info.Orientation = system.NormalizeLabel(data.Info.Orientation)
 		info := struct {
 			system.Info
 			GpuPct *float64 `json:"g,omitempty"`

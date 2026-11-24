@@ -429,6 +429,51 @@ export const parseSemVer = (semVer = ""): SemVer => {
 }
 
 /** Compare two semver strings. Returns -1 if a is less than b, 0 if a is equal to b, and 1 if a is greater than b. */
+const displayModePattern = /[0-9]+x[0-9]+/g
+
+/** Distinct display sizes, capped. A repeated 1080x1920 becomes one value. */
+export function displayTokens(value: unknown, limit = 4): string[] {
+	const raw = Array.isArray(value) ? value.map((item) => String(item)).join(" ") : String(value ?? "")
+	const matches = raw.match(displayModePattern) ?? []
+	const unique: string[] = []
+	for (const match of matches) {
+		if (!unique.includes(match)) {
+			unique.push(match)
+		}
+		if (unique.length === limit) {
+			break
+		}
+	}
+	if (unique.length > 0) {
+		return unique
+	}
+	const collapsed = collapseRepeat(raw.trim())
+	return collapsed ? [collapsed] : []
+}
+
+/** One label, or the single phrase if the stored text is that phrase repeated. */
+export function labelTokens(value: unknown): string[] {
+	const collapsed = collapseRepeat(Array.isArray(value) ? value.map((item) => String(item)).join(" ") : String(value ?? ""))
+	return collapsed ? [collapsed] : []
+}
+
+function collapseRepeat(value: string): string {
+	const compact = value.replace(/[\s,;]+/g, "")
+	if (!compact) {
+		return ""
+	}
+	for (let size = 1; size <= compact.length / 2; size++) {
+		if (compact.length % size !== 0) {
+			continue
+		}
+		const prefix = compact.slice(0, size)
+		if (prefix.repeat(compact.length / size) === compact && compact.length / size >= 2) {
+			return prefix
+		}
+	}
+	return value.length > 80 ? value.slice(0, 80) : value
+}
+
 /** Compare fleet build stamps such as 0.21.2-bw.12+abc. A stamped build is newer than plain 0.21.2. */
 export function compareFleetVersion(a = "", b = "") {
 	const parse = (value: string) => {
