@@ -72,14 +72,14 @@ Collection is on by default. Set `BRIGHTNESS=false` (or `BESZEL_AGENT_BRIGHTNESS
 | `ddc` | DDC/CI only. No backlight fallback. |
 | `backlight` | `/sys/class/backlight` only. |
 
-The percent is `current / max * 100` from the getvcp line (`current value = N, max value = M`). Max is not assumed to be 100. A failed read is omitted, never stored as 0%. DDC is slow (about a second), so the agent caches the result for one minute, runs at most one `ddcutil` at a time, and does not wait for it before sending the other stats. The value shows up on a later sample. A permission failure logs one warning and stays omitted.
+The percent is `current / max * 100` from the getvcp line (`current value = N, max value = M`). Max is not assumed to be 100. A failed read is omitted, never stored as 0%. DDC is slow (about a second), so the agent caches the result for one minute, runs at most one `ddcutil` at a time, and does not wait for it before sending the other stats. The value shows up on a later sample. A permission failure or other `ddcutil` error is logged once at warning level. If the root helper's `/run/bright-watch/display.json` has a brightness reading from the last few minutes, that percent is used instead of leaving the value absent.
 
 ### Screen, apps, and OS
 
 These are sent on the system record (not charted). A value that cannot be read is omitted, not sent as an empty string.
 
-- **Resolution and orientation.** On Linux the agent reads connected DRM connectors under `/sys/class/drm` (`status` and the first mode). That works for a root systemd service with no `DISPLAY`. Orientation is `portrait` when the mode is taller than it is wide, and `landscape` otherwise. DRM modes are the panel's hardware modes and do not include compositor rotation. When `xrandr` or `wlr-randr` is installed and a session can be discovered (`DISPLAY`/`XAUTHORITY`, or a Wayland socket under `/run/user`), the agent uses that geometry instead and appends the rotation, for example `portrait (90°)`. `xrandr` rotations are `normal` 0°, `left` 90°, `inverted` 180°, and `right` 270°.
-- **ss-app and ss-iot.** Versions come from each app's `package.json` `version`. Set `SS_APP_PACKAGE_JSON` and `SS_IOT_PACKAGE_JSON` (or the `BESZEL_AGENT_` prefixed names) to the files. When unset, the agent looks a few levels under `/opt`, `/srv`, `/home`, and the `node_modules` directories in `/usr/lib` and `/usr/local/lib` for a package whose `name` is `ss-app` or `ss-iot`. An explicit path that is missing or has no version stays omitted and is not replaced by the search.
+- **Resolution and orientation.** `scripts/upgrade-agent.sh` installs a root helper, `bright-watch-display.timer`, which runs every two minutes. It finds the running Xorg `-auth` file from `/proc/<pid>/cmdline` (or a Wayland socket), runs `xrandr --query`, and writes world-readable `/run/bright-watch/display.json`. The resolution in that file is the logical size after rotation (`1080x1920` for a portrait panel). `mode` is the current hardware mode (`1920x1080`), which is the starred mode, not the first line of the mode list. Rotation words are `normal` 0°, `left` 90°, `inverted` 180°, and `right` 270°. The agent uses that file when it is less than six minutes old. If it is missing, the agent tries its own `xrandr` or `wlr-randr`. The last resort is the current CRTC mode in `/sys/kernel/debug/dri/*/state`. That mode has no rotation, so resolution and orientation stay omitted rather than guessed. `/sys/class/drm/*/modes` is not the current mode; its first line is the panel maximum.
+- **ss-app and ss-iot.** Versions come from each app's `package.json` `version`. Set `SS_APP_PACKAGE_JSON` and `SS_IOT_PACKAGE_JSON` (or the `BESZEL_AGENT_` prefixed names) to override the paths. When those are unset, the agent reads `/run/bright-watch/apps.json` from the root helper, then `/home/vs/smartselect/package.json` (`ss-app`) and `/home/vs/smartiot/package.json` (`ss-iot`). Those homes are often mode 700, so the service user cannot open them; the helper runs as root and copies the versions. After that it still searches a few levels under `/opt`, `/srv`, `/home`, and the `node_modules` directories in `/usr/lib` and `/usr/local/lib` for a package whose `name` is `ss-app` or `ss-iot`. An explicit path that can be read and has no version stays omitted. An explicit path that cannot be read falls back to the helper file.
 - **OS.** Beszel already reads `PRETTY_NAME` and the kernel for the system details record. Those strings are copied onto the system record (`osr` and the existing `k` kernel field) so the All Systems table can show them.
 
 Screen and package versions are cached for five minutes. The All Systems columns are Resolution, Orientation, ss-app, ss-iot, and OS. They sort with the other columns, match the table filter, and can be hidden from Visible Fields. The same strings appear on the system page header.
@@ -104,6 +104,8 @@ udevadm trigger
 getent group i2c >/dev/null || groupadd i2c
 usermod -aG i2c BESZEL_AGENT_USER
 ```
+
+Group membership is applied when the process starts. `scripts/upgrade-agent.sh` also writes `/etc/systemd/system/beszel-agent.service.d/10-i2c.conf` with `SupplementaryGroups=` set to the unit's existing groups plus `i2c` (so `systemd-journal` is kept), runs `daemon-reload`, and restarts the service.
 
 Install `ddcutil`, then restart the agent service so it picks up the new group. Confirm with that same user (not only as root):
 
@@ -131,7 +133,7 @@ curl -fsSL -o /tmp/upgrade-agent.sh https://raw.githubusercontent.com/Pradeeps-r
 bash /tmp/upgrade-agent.sh
 ```
 
-The script is idempotent. It detects the architecture, checks sha256 before touching the live binary, keeps the previous binary as `/opt/beszel-agent/beszel-agent.bak`, installs `ddcutil` with apt when it is missing, loads `i2c-dev` at boot, and gives the service user access to `/dev/i2c-*` (i2c group plus a udev rule). It then restarts the service and prints `systemctl status` and the brightness `ddcutil getvcp 10` returns for that user. A failed restart restores the `.bak` binary. Rollback is also printed at the end:
+The script is idempotent. It detects the architecture, checks sha256 before touching the live binary, keeps the previous binary as `/opt/beszel-agent/beszel-agent.bak`, installs `ddcutil` with apt when it is missing, loads `i2c-dev` at boot, and gives the service user access to `/dev/i2c-*` (i2c group, a udev rule, and a `SupplementaryGroups=i2c` drop-in). It installs `/opt/beszel-agent/bright-watch-display.sh` plus a systemd timer that rewrites `/run/bright-watch/display.json` and `apps.json` every two minutes. It then restarts the service when the binary or the i2c drop-in changed. The self-test at the end runs as the service user and prints brightness, resolution, mode, orientation, OS, ss-app, and ss-iot as the agent will report them. A failed `ddcutil` as that user is printed, and brightness then comes from the helper file. A failed restart restores the `.bak` binary. Rollback is also printed at the end:
 
 ```bash
 systemctl stop beszel-agent.service

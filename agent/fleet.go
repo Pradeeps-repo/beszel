@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -21,13 +22,27 @@ const (
 	packageNameIot = "ss-iot"
 )
 
+// Default package.json paths on Bright.Blue machines. The home directory may
+// be mode 700, so the agent also reads the root helper's apps.json first.
+var (
+	defaultAppPackage = "/home/vs/smartselect/package.json"
+	defaultIotPackage = "/home/vs/smartiot/package.json"
+)
+
+// procRoot is where Xorg's command line is read to find its -auth file.
+var procRoot = "/proc"
+
 // fleetSnapshot is inventory that changes rarely. Empty strings are omitted
 // from the system record so a miss is absent, not a blank value.
 type fleetSnapshot struct {
 	Resolution  string
 	Orientation string
-	SsApp       string
-	SsIot       string
+	// Mode is the current hardware mode before rotation, e.g. "1920x1080".
+	// Resolution is the logical size after rotation. Empty means unknown.
+	Mode   string
+	Output string
+	SsApp  string
+	SsIot  string
 }
 
 // collectDisplay reads the connected screen. Nil-safe default is no display.
@@ -75,6 +90,7 @@ func (a *Agent) updateFleetInfo() {
 	}
 	a.systemInfo.Screen = a.fleet.Resolution
 	a.systemInfo.Orientation = a.fleet.Orientation
+	a.systemInfo.Mode = a.fleet.Mode
 	a.systemInfo.SsApp = a.fleet.SsApp
 	a.systemInfo.SsIot = a.fleet.SsIot
 }
@@ -85,23 +101,41 @@ type appVersions struct {
 }
 
 func readAppVersions() appVersions {
-	var versions appVersions
 	appPath, appSet := utils.GetEnv("SS_APP_PACKAGE_JSON")
 	iotPath, iotSet := utils.GetEnv("SS_IOT_PACKAGE_JSON")
+	var versions appVersions
+	appDenied := false
+	iotDenied := false
 	if appSet {
-		versions.SsApp = versionFromPackageJSON(appPath, "")
+		versions.SsApp, appDenied = versionFromPackage(appPath)
 	}
 	if iotSet {
-		versions.SsIot = versionFromPackageJSON(iotPath, "")
+		versions.SsIot, iotDenied = versionFromPackage(iotPath)
 	}
-	if appSet && iotSet {
+	// The service user often cannot read /home/vs. The root helper copies the
+	// versions into apps.json. An explicit path that can be read still wins.
+	helper, helperOK := readFreshWatchApps()
+	if helperOK {
+		if versions.SsApp == "" && (!appSet || appDenied) {
+			versions.SsApp = helper.SsApp
+		}
+		if versions.SsIot == "" && (!iotSet || iotDenied) {
+			versions.SsIot = helper.SsIot
+		}
+	}
+	if versions.SsApp != "" && versions.SsIot != "" {
+		return versions
+	}
+	needApp := (!appSet || appDenied) && versions.SsApp == ""
+	needIot := (!iotSet || iotDenied) && versions.SsIot == ""
+	if !needApp && !needIot {
 		return versions
 	}
 	found := discoverPackageVersions(packageSearchRoots)
-	if !appSet {
+	if needApp {
 		versions.SsApp = found.SsApp
 	}
-	if !iotSet {
+	if needIot {
 		versions.SsIot = found.SsIot
 	}
 	return versions
@@ -115,25 +149,46 @@ func versionFromPackageJSON(path, wantName string) string {
 		return ""
 	}
 	defer file.Close()
+	version, _ := versionFromReader(file, wantName)
+	return version
+}
+
+// versionFromPackage reports the version and whether the open was denied.
+// A readable file with no version is not denied, so discovery does not replace it.
+func versionFromPackage(path string) (version string, denied bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", os.IsPermission(err)
+	}
+	defer file.Close()
+	version, _ = versionFromReader(file, "")
+	return version, false
+}
+
+func versionFromReader(file io.Reader, wantName string) (string, bool) {
 	data, err := io.ReadAll(io.LimitReader(file, 512*1024))
 	if err != nil {
-		return ""
+		return "", false
 	}
 	var pkg struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(data, &pkg); err != nil {
-		return ""
+		return "", false
 	}
 	if wantName != "" && pkg.Name != wantName {
-		return ""
+		return "", true
 	}
-	return strings.TrimSpace(pkg.Version)
+	return strings.TrimSpace(pkg.Version), true
 }
 
 func discoverPackageVersions(roots []string) appVersions {
-	var versions appVersions
+	// Field installs keep the apps here. Try them before the wider search.
+	versions := appVersions{
+		SsApp: versionFromPackageJSON(defaultAppPackage, ""),
+		SsIot: versionFromPackageJSON(defaultIotPackage, ""),
+	}
 	budget := 48
 	for _, root := range roots {
 		maxDepth := 3
@@ -244,8 +299,10 @@ func rotationDegrees(name string) (int, bool) {
 
 // parseXrandr reads `xrandr --query` output. The connected geometry is the
 // transformed size; the following word is the rotation when xrandr prints one.
+// The starred mode under that output is the current hardware mode.
 func parseXrandr(output string) fleetSnapshot {
-	for _, line := range strings.Split(output, "\n") {
+	lines := strings.Split(output, "\n")
+	for i, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) < 3 || fields[1] != "connected" {
 			continue
@@ -267,9 +324,31 @@ func parseXrandr(output string) fleetSnapshot {
 		if geometry == "" {
 			continue
 		}
-		return displayFromMode(geometry, rotation, true)
+		snap := displayFromMode(geometry, rotation, true)
+		snap.Mode = currentXrandrMode(lines[i+1:])
+		snap.Output = fields[0]
+		return snap
 	}
 	return fleetSnapshot{}
+}
+
+func currentXrandrMode(lines []string) string {
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			break
+		}
+		if !strings.Contains(line, "*") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) > 0 && modePattern.MatchString(fields[0]) {
+			return fields[0]
+		}
+	}
+	return ""
 }
 
 // parseWlrRandr reads `wlr-randr` output. Transform is the compositor rotation.
@@ -349,45 +428,216 @@ func connectorRank(name string) int {
 	}
 }
 
-// readDRMDisplay returns the preferred connected connector under a DRM class directory.
+var (
+	drmConnectorHeader = regexp.MustCompile(`^connector(?:\[[0-9]+\])?:\s+(\S+)`)
+	drmCrtcHeader      = regexp.MustCompile(`^crtc(?:\[[0-9]+\])?:\s+(\S+)|^((?:crtc-)?[0-9]+):\s*$`)
+	drmModeLine        = regexp.MustCompile(`^mode:\s+"?([0-9]+x[0-9]+)"?`)
+)
+
+// parseDRMDebugState reads a DRM debugfs state file. The current mode is the
+// CRTC mode attached to a connected connector. The modes file under
+// /sys/class/drm is the panel's mode list, and its first line is the maximum,
+// so this parser never uses that list.
+func parseDRMDebugState(text string) (mode, output string, ok bool) {
+	type block struct {
+		kind   string
+		name   string
+		crtc   string
+		status string
+		mode   string
+	}
+	var blocks []block
+	var cur *block
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		blocks = append(blocks, *cur)
+		cur = nil
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			flush()
+			switch {
+			case drmConnectorHeader.MatchString(line):
+				match := drmConnectorHeader.FindStringSubmatch(line)
+				cur = &block{kind: "connector", name: match[1]}
+			case drmCrtcHeader.MatchString(line):
+				match := drmCrtcHeader.FindStringSubmatch(line)
+				name := match[1]
+				if name == "" {
+					name = match[2]
+				}
+				cur = &block{kind: "crtc", name: name}
+			}
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		trim := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trim, "crtc=") || strings.HasPrefix(trim, "crtc:"):
+			value := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trim, "crtc="), "crtc:"))
+			if value != "" && value != "0" && !strings.EqualFold(value, "none") {
+				cur.crtc = value
+			}
+		case strings.HasPrefix(trim, "status:"):
+			cur.status = strings.TrimSpace(strings.TrimPrefix(trim, "status:"))
+		case strings.HasPrefix(trim, "connector state:"):
+			cur.status = strings.TrimSpace(strings.TrimPrefix(trim, "connector state:"))
+		default:
+			if cur.kind != "crtc" {
+				continue
+			}
+			if match := drmModeLine.FindStringSubmatch(trim); match != nil {
+				cur.mode = match[1]
+			}
+		}
+	}
+	flush()
+
+	modes := map[string]string{}
+	for _, item := range blocks {
+		if item.kind == "crtc" && item.mode != "" {
+			modes[item.name] = item.mode
+		}
+	}
+	bestRank := 99
+	for _, item := range blocks {
+		if item.kind != "connector" || item.crtc == "" {
+			continue
+		}
+		status := strings.ToLower(item.status)
+		if status != "" && status != "connected" {
+			continue
+		}
+		current := modes[item.crtc]
+		if current == "" {
+			continue
+		}
+		rank := connectorRank(item.name)
+		if ok && rank >= bestRank {
+			continue
+		}
+		bestRank = rank
+		mode = current
+		output = item.name
+		ok = true
+	}
+	return mode, output, ok
+}
+
+// readDRMDisplay returns the current CRTC mode. A modes-only sysfs tree is
+// unknown: the first line of modes is the panel maximum, not the live mode.
+// Rotation is not in DRM state, so resolution and orientation stay empty.
 func readDRMDisplay(root string) fleetSnapshot {
+	return readDRMCurrent(root)
+}
+
+func readDRMCurrent(root string) fleetSnapshot {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return fleetSnapshot{}
 	}
+	best := fleetSnapshot{}
 	bestRank := 99
-	var best fleetSnapshot
+	found := false
 	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.Contains(name, "-") {
+		if !entry.IsDir() {
 			continue
 		}
-		dir := filepath.Join(root, name)
-		status, err := os.ReadFile(filepath.Join(dir, "status"))
-		if err != nil || strings.TrimSpace(string(status)) != "connected" {
-			continue
-		}
-		modes, err := os.ReadFile(filepath.Join(dir, "modes"))
+		data, err := os.ReadFile(filepath.Join(root, entry.Name(), "state"))
 		if err != nil {
 			continue
 		}
-		var mode string
-		for _, line := range strings.Split(string(modes), "\n") {
-			line = strings.TrimSpace(line)
-			if modePattern.MatchString(line) {
-				mode = line
-				break
-			}
-		}
-		if mode == "" {
+		mode, output, ok := parseDRMDebugState(string(data))
+		if !ok {
 			continue
 		}
-		rank := connectorRank(name)
-		if best.Resolution != "" && rank >= bestRank {
+		rank := connectorRank(output)
+		if found && rank >= bestRank {
 			continue
 		}
+		found = true
 		bestRank = rank
-		best = displayFromMode(mode, "", false)
+		best = fleetSnapshot{Mode: mode, Output: output}
 	}
 	return best
+}
+
+// parseXorgArgs reads an Xorg/X command line. The -auth path is the file
+// xrandr must use; guessing ~/.Xauthority is not enough on these machines.
+func parseXorgArgs(args []string) (display, auth string, ok bool) {
+	if len(args) == 0 || args[0] == "" {
+		return "", "", false
+	}
+	switch filepath.Base(args[0]) {
+	case "Xorg", "X", "Xorg.bin":
+	default:
+		return "", "", false
+	}
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-auth" && i+1 < len(args) {
+			auth = args[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, ":") && !strings.Contains(arg, "=") {
+			display = arg
+		}
+	}
+	if auth == "" {
+		return "", "", false
+	}
+	if display == "" {
+		display = ":0"
+	}
+	return display, auth, true
+}
+
+func findXorgAuth(root string) (display, auth string, ok bool) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", "", false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == "" || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(root, name, "cmdline"))
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		display, auth, ok = parseXorgArgs(splitCmdline(data))
+		if !ok {
+			continue
+		}
+		info, err := os.Stat(auth)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		return display, auth, true
+	}
+	return "", "", false
+}
+
+func splitCmdline(data []byte) []string {
+	parts := bytes.Split(data, []byte{0})
+	args := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		args = append(args, string(part))
+	}
+	return args
 }

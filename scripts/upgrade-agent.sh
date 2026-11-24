@@ -12,7 +12,9 @@ RELEASE_BASE="${BESZEL_AGENT_RELEASE_BASE:-https://github.com/Pradeeps-repo/besz
 BIN_PATH="${BESZEL_AGENT_BIN:-/opt/beszel-agent/beszel-agent}"
 SERVICE="${BESZEL_AGENT_SERVICE:-beszel-agent.service}"
 LOCK_FILE="${BESZEL_AGENT_LOCK:-/var/lock/beszel-upgrade-agent.lock}"
+HELPER_PATH="${BESZEL_DISPLAY_HELPER:-/opt/beszel-agent/bright-watch-display.sh}"
 NEED_RESTART=0
+NEED_DAEMON_RELOAD=0
 
 log() {
   printf '%s\n' "$*"
@@ -147,22 +149,198 @@ ensure_i2c() {
   fi
 }
 
-read_brightness() {
-  local user="$1" output
-  if ! command -v ddcutil >/dev/null 2>&1; then
-    log "brightness: absent (ddcutil not installed; not reported as 0)"
+# Drop-in SupplementaryGroups replaces the unit's list, so keep groups that
+# are already set (systemd-journal) and add i2c.
+supplementary_groups_value() {
+  local existing="$1" token have_i2c=0
+  if [ -z "$existing" ]; then
+    printf '%s\n' i2c
     return 0
   fi
-  if ! output="$(runuser -u "$user" -- ddcutil getvcp 10 2>&1)"; then
-    log "brightness: absent (ddcutil failed for user ${user}; not reported as 0)"
-    printf '%s\n' "$output"
-    return 0
-  fi
-  if percent="$(brightness_percent "$output")"; then
-    log "brightness: ${percent}%"
+  for token in $existing; do
+    if [ "$token" = "i2c" ]; then
+      have_i2c=1
+    fi
+  done
+  if [ "$have_i2c" -eq 1 ]; then
+    printf '%s\n' "$existing"
   else
-    log "brightness: absent (getvcp output had no current/max; not reported as 0)"
-    printf '%s\n' "$output"
+    printf '%s\n' "${existing} i2c"
+  fi
+}
+
+# Last SupplementaryGroups= line outside this script's own drop-in.
+groups_from_unit_text() {
+  awk '
+    /^# / {
+      file = $0
+      sub(/^# /, "", file)
+      skip = (file ~ /(^|\/)10-i2c\.conf$/)
+      next
+    }
+    skip { next }
+    /^SupplementaryGroups=/ {
+      value = $0
+      sub(/^SupplementaryGroups=/, "", value)
+      last = value
+    }
+    END { if (last != "") print last }
+  '
+}
+
+ensure_python3() {
+  if command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+  command -v apt-get >/dev/null 2>&1 || die "python3 is required for the display helper"
+  log "Installing python3"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold \
+    python3
+}
+
+ensure_i2c_dropin() {
+  local dir="/etc/systemd/system/${SERVICE}.d"
+  local file="${dir}/10-i2c.conf"
+  local existing desired body current=""
+  mkdir -p "$dir"
+  existing="$(systemctl cat "$SERVICE" 2>/dev/null | groups_from_unit_text || true)"
+  desired="$(supplementary_groups_value "$existing")"
+  body="$(printf '[Service]\nSupplementaryGroups=%s\n' "$desired")"
+  if [ -f "$file" ]; then
+    current="$(cat "$file")"
+  fi
+  if [ "$current" != "$body" ]; then
+    log "Writing ${file} (SupplementaryGroups=${desired})"
+    printf '%s' "$body" >"$file"
+    NEED_RESTART=1
+    NEED_DAEMON_RELOAD=1
+  fi
+}
+
+script_dir() {
+  dirname "$(readlink -f "${BASH_SOURCE[0]}")"
+}
+
+write_if_changed() {
+  local path="$1" body="$2" current=""
+  case "$body" in
+    *$'\n') ;;
+    *) body="${body}"$'\n' ;;
+  esac
+  if [ -f "$path" ]; then
+    current="$(cat "$path")"
+  fi
+  if [ "$current" != "$body" ]; then
+    log "Writing ${path}"
+    printf '%s' "$body" >"$path"
+    NEED_DAEMON_RELOAD=1
+  fi
+}
+
+install_display_helper() {
+  local dest="$1" src url staged
+  mkdir -p "$(dirname "$dest")"
+  src="$(script_dir)/bright-watch-display.sh"
+  if [ -f "$src" ]; then
+    install -m 0755 "$src" "$dest"
+    return 0
+  fi
+  url="${BESZEL_DISPLAY_HELPER_URL:-https://raw.githubusercontent.com/Pradeeps-repo/beszel/main/scripts/bright-watch-display.sh}"
+  staged="${dest}.new"
+  log "Downloading ${url}"
+  curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused -o "$staged" "$url"
+  grep -q 'display.json' "$staged" || die "downloaded display helper is not bright-watch-display.sh"
+  install -m 0755 "$staged" "$dest"
+  rm -f "$staged"
+}
+
+helper_package_env() {
+  local key="$1" value
+  value="$(systemctl show -p Environment --value "$SERVICE" 2>/dev/null | tr ' ' '\n' | awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' || true)"
+  printf '%s\n' "$value"
+}
+
+ensure_display_helper() {
+  local dest="$HELPER_PATH"
+  local unit="/etc/systemd/system/bright-watch-display.service"
+  local timer="/etc/systemd/system/bright-watch-display.timer"
+  local dropin="/etc/systemd/system/bright-watch-display.service.d/paths.conf"
+  local unit_body timer_body drop_body="" app iot
+  mkdir -p /etc/systemd/system/bright-watch-display.service.d
+  install_display_helper "$dest"
+  unit_body="$(cat <<EOF
+[Unit]
+Description=Record display mode, brightness, and app versions for Beszel
+After=systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=30
+ExecStart=${dest}
+EOF
+)"
+  timer_body="$(cat <<EOF
+[Unit]
+Description=Record display mode, brightness, and app versions for Beszel
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=2min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+)"
+  app="$(helper_package_env SS_APP_PACKAGE_JSON)"
+  if [ -z "$app" ]; then
+    app="$(helper_package_env BESZEL_AGENT_SS_APP_PACKAGE_JSON)"
+  fi
+  iot="$(helper_package_env SS_IOT_PACKAGE_JSON)"
+  if [ -z "$iot" ]; then
+    iot="$(helper_package_env BESZEL_AGENT_SS_IOT_PACKAGE_JSON)"
+  fi
+  if [ -n "$app" ] || [ -n "$iot" ]; then
+    drop_body="[Service]"$'\n'
+    if [ -n "$app" ]; then
+      drop_body+="Environment=SS_APP_PACKAGE_JSON=${app}"$'\n'
+    fi
+    if [ -n "$iot" ]; then
+      drop_body+="Environment=SS_IOT_PACKAGE_JSON=${iot}"$'\n'
+    fi
+  fi
+  write_if_changed "$unit" "$unit_body"
+  write_if_changed "$timer" "$timer_body"
+  if [ -n "$drop_body" ]; then
+    write_if_changed "$dropin" "$drop_body"
+  fi
+}
+
+self_test() {
+  local user="$1" output="" percent=""
+  log "self-test as ${user}:"
+  if [ ! -x "$HELPER_PATH" ]; then
+    log "  display helper is not installed"
+    return 0
+  fi
+  if command -v ddcutil >/dev/null 2>&1; then
+    if output="$(runuser -u "$user" -- ddcutil getvcp 10 2>&1)"; then
+      percent="$(brightness_percent "$output" || true)"
+    else
+      log "  ddcutil as ${user} failed:"
+      printf '%s\n' "$output" | awk 'NR<=30'
+      log "  brightness below is from /run/bright-watch/display.json when ddcutil cannot open i2c"
+    fi
+  else
+    log "  ddcutil as ${user}: not installed"
+  fi
+  if ! BRIGHT_WATCH_DDC_PERCENT="$percent" runuser -u "$user" -- env BRIGHT_WATCH_DDC_PERCENT="$percent" "$HELPER_PATH" --print; then
+    log "  could not read /run/bright-watch as ${user}"
   fi
 }
 
@@ -231,7 +409,17 @@ main() {
   # Prepare DDC access before swapping the binary. A package failure then
   # leaves the running agent untouched.
   ensure_ddcutil
+  ensure_python3
   ensure_i2c "$user"
+  ensure_i2c_dropin
+  ensure_display_helper
+  if [ "$NEED_DAEMON_RELOAD" -eq 1 ]; then
+    systemctl daemon-reload
+  fi
+  systemctl enable --now bright-watch-display.timer
+  if ! systemctl start bright-watch-display.service; then
+    log "WARNING: display helper did not complete. Resolution and app versions may be absent."
+  fi
 
   staged="$(mktemp -d)"
   trap 'status=$?; [ -n "${staged:-}" ] && rm -rf "$staged"; if [ "$status" -ne 0 ] && [ "${stopped:-0}" -eq 1 ] && [ "$(systemctl is-active "$SERVICE" 2>/dev/null || true)" != "active" ]; then if [ "${replaced:-0}" -eq 1 ]; then rollback_binary; else systemctl start "$SERVICE" || true; fi; print_rollback; fi; exit "$status"' EXIT
@@ -242,7 +430,7 @@ main() {
   if [ -f "$BIN_PATH" ] && verify_sha256 "$BIN_PATH" "$(expected_sha256 "${staged}/beszel-agent.sha256")" && [ "$NEED_RESTART" -eq 0 ]; then
     log "Already up to date; leaving ${SERVICE} running"
     print_status
-    read_brightness "$user"
+    self_test "$user"
     print_rollback
     log "RESULT asset=${asset} replaced=0 service=active"
     exit 0
@@ -275,7 +463,7 @@ main() {
   fi
 
   print_status
-  read_brightness "$user"
+  self_test "$user"
   print_rollback
   log "RESULT asset=${asset} replaced=${replaced} service=active"
 }

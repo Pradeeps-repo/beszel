@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -168,10 +169,13 @@ func TestUpdateBrightness(t *testing.T) {
 	origPlatform := platformBrightnessFn
 	origExternal := externalBrightnessFn
 	origAvailable := ddcutilAvailableFn
+	origWatch := watchDisplayPath
+	watchDisplayPath = filepath.Join(t.TempDir(), "missing.json")
 	t.Cleanup(func() {
 		platformBrightnessFn = origPlatform
 		externalBrightnessFn = origExternal
 		ddcutilAvailableFn = origAvailable
+		watchDisplayPath = origWatch
 	})
 
 	t.Run("disabled leaves stats unchanged", func(t *testing.T) {
@@ -289,8 +293,43 @@ func TestUpdateBrightness(t *testing.T) {
 		assert.Equal(t, 0, externalCalls)
 	})
 
+	t.Run("permission failure uses a fresh helper brightness", func(t *testing.T) {
+		t.Setenv("BRIGHTNESS_SOURCE", "auto")
+		dir := t.TempDir()
+		orig := watchDisplayPath
+		watchDisplayPath = filepath.Join(dir, "display.json")
+		t.Cleanup(func() { watchDisplayPath = orig })
+		payload, err := json.Marshal(map[string]any{
+			"updated":    time.Now().UTC().Format(time.RFC3339),
+			"brightness": 100,
+		})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(watchDisplayPath, payload, 0o644))
+		ddcutilAvailableFn = func() bool { return true }
+		platformCalls := 0
+		platformBrightnessFn = func() *uint8 {
+			platformCalls++
+			pct := uint8(50)
+			return &pct
+		}
+		externalBrightnessFn = func() (*uint8, error) {
+			return nil, classifyDDCFailure("Opening /dev/i2c-2: Permission denied", errors.New("exit status 1"))
+		}
+		agent := &Agent{}
+		agent.updateBrightness(&system.Stats{})
+		require.Eventually(t, func() bool {
+			agent.brightnessMu.Lock()
+			defer agent.brightnessMu.Unlock()
+			return agent.brightnessCached && agent.brightness != nil && *agent.brightness == 100 && !agent.brightnessProbe.Load()
+		}, time.Second, 10*time.Millisecond)
+		assert.Equal(t, 0, platformCalls)
+	})
+
 	t.Run("permission failure is absent and does not use backlight", func(t *testing.T) {
 		t.Setenv("BRIGHTNESS_SOURCE", "auto")
+		orig := watchDisplayPath
+		watchDisplayPath = filepath.Join(t.TempDir(), "missing.json")
+		t.Cleanup(func() { watchDisplayPath = orig })
 		ddcutilAvailableFn = func() bool { return true }
 		platformCalls := 0
 		platformBrightnessFn = func() *uint8 {

@@ -51,6 +51,8 @@ var (
 	brightnessReadyLog    sync.Once
 	brightnessSourceLog   sync.Once
 	brightnessDeniedLog   sync.Once
+	brightnessHelperLog   sync.Once
+	brightnessFailLog     sync.Once
 	errBrightnessFailed   = errors.New("brightness collection failed")
 	errDDCMissing         = errors.New("ddcutil not found")
 	errDDCNoDisplay       = errors.New("no DDC display responded")
@@ -186,21 +188,33 @@ func (a *Agent) probeBrightness(source brightnessSource) {
 		logBrightness(*pct)
 	case errors.Is(err, errDDCDenied):
 		warnBrightnessPermission(err)
+		if a.storeHelperBrightness() {
+			break
+		}
 		a.storeBrightness(nil, true)
 	case errors.Is(err, errDDCMissing) || errors.Is(err, errDDCNoDisplay):
 		if source == brightnessSourceDDC {
-			a.storeBrightness(nil, true)
+			if !a.storeHelperBrightness() {
+				a.storeBrightness(nil, true)
+			}
 			break
 		}
 		fallback := readPlatformBrightness()
+		if fallback == nil && a.storeHelperBrightness() {
+			break
+		}
 		a.storeBrightness(fallback, true)
 		if fallback != nil {
 			logBrightness(*fallback)
 		}
 	default:
-		// Timeout or other bus error. Keep the last good percent when we have
-		// one. A value we never read stays absent, not 0.
-		slog.Debug("Error reading display brightness", "err", err)
+		// Timeout or other bus error. Log it; a silent miss is how a
+		// permission or bus failure was missed on the fleet. Keep the last
+		// good percent when the root helper has nothing newer.
+		warnBrightnessFailure(err)
+		if a.storeHelperBrightness() {
+			break
+		}
 		a.brightnessMu.Lock()
 		a.brightnessCached = true
 		a.brightnessAt = time.Now()
@@ -248,6 +262,26 @@ func warnBrightnessPermission(err error) {
 	brightnessDeniedLog.Do(func() {
 		slog.Warn("ddcutil cannot read screen brightness (permission denied on /dev/i2c-*). Load i2c-dev (modprobe i2c-dev), install ddcutil, and grant the agent access to /dev/i2c-* via the i2c group or a udev rule: KERNEL==\"i2c-[0-9]*\", GROUP=\"i2c\", MODE=\"0660\". Restart the agent after adding the group. Brightness is omitted, not reported as 0.", "err", err)
 	})
+}
+
+func warnBrightnessFailure(err error) {
+	brightnessFailLog.Do(func() {
+		slog.Warn("ddcutil failed to read screen brightness", "err", err)
+	})
+}
+
+// storeHelperBrightness uses the root helper when the service user cannot
+// open the I2C bus. The helper file is ignored when it is missing or stale.
+func (a *Agent) storeHelperBrightness() bool {
+	pct, ok := helperBrightness()
+	if !ok || pct == nil {
+		return false
+	}
+	brightnessHelperLog.Do(func() {
+		slog.Warn("ddcutil failed for the agent user; using brightness from /run/bright-watch/display.json", "percent", *pct)
+	})
+	a.storeBrightness(pct, true)
+	return true
 }
 
 // classifyDDCFailure distinguishes a permission problem from "no display" and other failures.
