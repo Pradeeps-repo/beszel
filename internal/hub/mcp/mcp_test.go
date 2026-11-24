@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -202,6 +203,14 @@ func callToolError(t *testing.T, session *mcpsdk.ClientSession, name string, arg
 }
 
 func TestMcpNotRegistered(t *testing.T) {
+	t.Setenv("BESZEL_HUB_MCP", "")
+	t.Setenv("MCP", "")
+	t.Setenv("BESZEL_HUB_MCP_TOKEN", "")
+	t.Setenv("MCP_TOKEN", "")
+	require.NoError(t, os.Unsetenv("BESZEL_HUB_MCP"))
+	require.NoError(t, os.Unsetenv("MCP"))
+	require.NoError(t, os.Unsetenv("BESZEL_HUB_MCP_TOKEN"))
+	require.NoError(t, os.Unsetenv("MCP_TOKEN"))
 	hub, err := beszelTests.NewTestHub(t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(hub.Cleanup)
@@ -567,8 +576,8 @@ func TestMcpToolsList(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	require.ElementsMatch(t, []string{
-		"list_systems", "get_system", "get_system_stats", "get_container_stats", "list_containers", "list_alerts",
-		"list_alert_events", "list_services", "get_disk_health", "list_network_monitors",
+		"list_systems", "get_system", "get_system_stats", "get_system_history", "get_container_stats", "list_containers", "list_alerts",
+		"fleet_summary", "list_alert_events", "list_services", "get_disk_health", "list_network_monitors",
 	}, names)
 }
 
