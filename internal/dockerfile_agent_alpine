@@ -26,7 +26,8 @@ COPY --from=builder /agent /agent
 # AMD GPU name lookup (used by agent on Linux when /usr/share/libdrm/amdgpu.ids is read)
 COPY --from=builder /app/agent/test-data/amdgpu.ids /usr/share/libdrm/amdgpu.ids
 
-RUN apk add --no-cache smartmontools zfs
+# ddcutil is required for DDC/CI screen brightness (VCP 0x10).
+RUN apk add --no-cache smartmontools zfs ddcutil
 
 # Ensure data persistence across container recreations
 VOLUME ["/var/lib/beszel-agent"]

@@ -107,7 +107,14 @@ The systemd unit's `User=` must be that group member. Root works without the gro
 
 ### Docker
 
-The default scratch agent image does not contain `ddcutil`. Use a host install (systemd) or an image that has `ddcutil` on `PATH`. Give the container the host I2C devices and the host `i2c` group's numeric id (`getent group i2c | cut -d: -f3`):
+Pushes to `main` and version tags (`v*`) publish multi-arch (`linux/amd64`, `linux/arm64`) images to GHCR:
+
+- Hub: `ghcr.io/pradeeps-repo/beszel` (`latest`, plus the short commit SHA on `main` or the version tag)
+- Agent: `ghcr.io/pradeeps-repo/beszel-agent` (Alpine image from `internal/dockerfile_agent_alpine`, with `ddcutil` installed)
+
+The scratch Dockerfile (`internal/dockerfile_agent`) still has no `ddcutil`. Use the GHCR agent image, or a host install, when brightness is read over DDC/CI.
+
+Give the container the host I2C devices and the host `i2c` group's numeric id (`getent group i2c | cut -d: -f3`):
 
 ```yaml
 group_add:
@@ -118,6 +125,8 @@ devices:
 ```
 
 List `/dev/i2c-*` on the host and pass every bus the panel uses. `privileged: true` also works and is broader than this needs. Mounting `/sys` is only the backlight fallback (`BRIGHTNESS_SOURCE=backlight`, or `auto` when `ddcutil` is absent).
+
+Coolify hub: change the image from `henrygd/beszel` to `ghcr.io/pradeeps-repo/beszel:latest`. Keep the `/beszel_data` volume and port `8090`. New GHCR packages are private. Either make `beszel` and `beszel-agent` public (package settings → Change visibility) or add a Coolify registry credential for `ghcr.io` (GitHub username + a PAT with `read:packages`).
 
 - **Windows:** WMI `WmiMonitorBrightness` in `root\wmi`. The first active monitor, by instance name, is reported. `BRIGHTNESS_SOURCE` does not apply.
 
