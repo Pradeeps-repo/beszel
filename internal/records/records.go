@@ -286,6 +286,8 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 	batteryCount := 0
 	batterySums := make(map[string]uint64)
 	batteryCounts := make(map[string]uint64)
+	brightnessSum := 0
+	brightnessCount := 0
 	// accumulate per-core usage across records
 	var cpuCoresSums []uint64
 	// accumulate cpu breakdown [user, system, iowait, steal, idle]
@@ -340,6 +342,11 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 			batterySum += int(stats.Battery[0])
 			batteryCount++
 			sum.Battery[1] = stats.Battery[1]
+		}
+		// Absent brightness is not zero. Average only samples that were read.
+		if stats.Brightness != nil {
+			brightnessSum += int(*stats.Brightness)
+			brightnessCount++
 		}
 		for name, percent := range stats.Batteries {
 			batterySums[name] += uint64(percent)
@@ -533,6 +540,10 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 	sum.Bandwidth[1] = sum.Bandwidth[1] / uint64(count)
 	if batteryCount > 0 {
 		sum.Battery[0] = uint8(batterySum / batteryCount)
+	}
+	if brightnessCount > 0 {
+		avg := uint8(math.Round(float64(brightnessSum) / float64(brightnessCount)))
+		sum.Brightness = &avg
 	}
 	if len(batterySums) > 0 {
 		sum.Batteries = make(map[string]uint8, len(batterySums))

@@ -53,9 +53,19 @@ The [quick start guide](https://beszel.dev/guide/getting-started) and other docu
 - **Fan speed** - Host system sensors (Linux, via `/sys/class/hwmon`).
 - **GPU usage / power draw** - Nvidia, AMD, and Intel.
 - **Battery charge** - Host system and some peripherals.
+- **Screen brightness** - Current panel brightness, as a percent. Omitted when it cannot be read (it is never reported as 0% unless the screen is actually at 0%).
 - **Containers** - Status and metrics of all running Docker / Podman containers.
 - **S.M.A.R.T.** - Host system disk health (includes eMMC wear/EOL and Linux mdraid array health via sysfs when available).
 - **ZFS** - Pool capacity, usage, health, I/O throughput, scrub status, and per-dataset usage.
+
+## Screen brightness
+
+The agent adds the current screen brightness to the same stats payload it already sends. The hub stores it on the system record (`info.br`) and in `system_stats` (`stats.br`). Both are existing JSON fields, so no database migration is required. The All Systems table has a sortable **Brightness** column (machines with no reading sort last, so they are not mixed up with 0%). Each system page shows a brightness chart once a reading exists.
+
+Collection is on by default. Set `BRIGHTNESS=false` (or `BESZEL_AGENT_BRIGHTNESS=false`) to turn it off.
+
+- **Linux:** `/sys/class/backlight` (the `raw` device when several exist, otherwise the finest scale). If that class has no readable panel, the agent tries `ddcutil getvcp 10` for an external display. That probe runs in the background and does not delay other stats; the value shows up on a later sample. Containers need the host sysfs mounted (`/sys:/sys:ro`). `ddcutil` is not in the default agent image.
+- **Windows:** WMI `WmiMonitorBrightness` in `root\wmi`. The first active monitor, by instance name, is reported.
 
 ## Help and discussion
 

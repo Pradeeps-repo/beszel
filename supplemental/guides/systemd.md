@@ -115,6 +115,7 @@ After=network.target
 Environment="PORT={PASTE_YOUR_PORT_HERE}"
 Environment="KEY={PASTE_YOUR_KEY_HERE}"
 # Environment="EXTRA_FILESYSTEMS={sdb}"
+# Environment="BRIGHTNESS=false"
 ExecStart={/path/to/directory}/beszel-agent
 User={YOUR_USERNAME}
 Restart=always

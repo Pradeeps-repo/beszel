@@ -345,6 +345,12 @@ msgstr "Became inactive"
 msgid "Before"
 msgstr "Before"
 
+#. Screen brightness column and chart
+#: src/components/systems-table/systems-table-columns.tsx
+#: src/components/routes/system/charts/sensor-charts.tsx
+msgid "Brightness"
+msgstr "Brightness"
+
 #. placeholder {0}: alert.value
 #. placeholder {1}: info.unit
 #. placeholder {2}: alert.min
@@ -1930,6 +1936,10 @@ msgstr "Save System"
 #: src/components/routes/settings/tokens-fingerprints.tsx
 msgid "Saved in the database and does not expire until you disable it."
 msgstr "Saved in the database and does not expire until you disable it."
+
+#: src/components/routes/system/charts/sensor-charts.tsx
+msgid "Screen brightness"
+msgstr "Screen brightness"
 
 #: src/components/routes/settings/quiet-hours.tsx
 msgid "Schedule"

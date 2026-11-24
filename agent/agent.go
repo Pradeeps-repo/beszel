@@ -44,6 +44,9 @@ type Agent struct {
 	tempsReading              atomic.Bool                                           // A temperature read is still running (possibly blocked in the kernel)
 	fansReading               atomic.Bool                                           // A fan read is still running (possibly blocked in the kernel)
 	systemInfo                system.Info                                           // Host system info (dynamic)
+	brightness                *uint8                                                // Last external-display brightness; nil if unreadable
+	brightnessCached          bool                                                  // external brightness probe has finished at least once
+	brightnessProbe           atomic.Bool                                           // external brightness probe is running
 	systemDetails             system.Details                                        // Host system details (static, once-per-connection)
 	detailsDirty              bool                                                  // Whether system details have changed and need to be resent
 	gpuManager                *GPUManager                                           // Manages GPU data
