@@ -12,6 +12,7 @@ import (
 	"github.com/henrygd/beszel"
 	"github.com/henrygd/beszel/agent"
 	"github.com/henrygd/beszel/agent/health"
+	"github.com/henrygd/beszel/agent/selfupdate"
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/ghupdate"
 	"github.com/spf13/pflag"
@@ -68,6 +69,16 @@ func (opts *cmdOptions) parse() bool {
 			log.Fatal(err)
 		}
 		fmt.Print("ok")
+		return true
+	case "update-finish":
+		if err := selfupdate.FinishCLI(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return true
+	case "install-fleet-helpers":
+		if err := selfupdate.InstallFleetHelpers("", selfupdate.HelperOptions{DdcutilExists: true}); err != nil {
+			log.Fatal(err)
+		}
 		return true
 	case "fingerprint":
 		handleFingerprint()

@@ -5,10 +5,15 @@ package beszel
 import "github.com/blang/semver"
 
 const (
-	// Version is the current version of the application.
-	Version = "0.21.2"
 	// AppName is the name of the application.
 	AppName = "beszel"
+)
+
+// Version and Commit are stamped with -ldflags -X. Fleet builds use
+// 0.21.2-bw.<run>+<commit> so one build can be told from another.
+var (
+	Version = "0.21.2"
+	Commit  = ""
 )
 
 // MinVersionCbor is the minimum supported version for CBOR compatibility.

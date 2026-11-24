@@ -74,6 +74,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Stamp version
+        id: version
+        run: |
+          base="$(awk -F'"' '/^[[:space:]]*Version = /{print $2; exit}' beszel.go)"
+          short="${GITHUB_SHA::7}"
+          echo "version=${base}-bw.${GITHUB_RUN_NUMBER}+${short}" >> "$GITHUB_OUTPUT"
+          echo "commit=${short}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
@@ -85,3 +93,6 @@ jobs:
           sbom: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BESZEL_VERSION=${{ steps.version.outputs.version }}
+            BESZEL_COMMIT=${{ steps.version.outputs.commit }}

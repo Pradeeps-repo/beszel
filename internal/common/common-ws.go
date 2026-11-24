@@ -30,6 +30,9 @@ const (
 	GetPackageUpdates
 	// Request recent logs for a systemd service from the agent.
 	GetSystemdLogs
+	// Ask the agent to install the configured release build.
+	// The hub sends a version, not a URL or a command.
+	ApplyAgentUpdate
 	// Add new actions here...
 )
 
@@ -90,4 +93,20 @@ type SystemdInfoRequest struct {
 
 type SystemdLogsRequest struct {
 	ServiceName string `cbor:"0,keyasint"`
+}
+
+// AgentUpdateRequest is the only payload the hub may send to start an update.
+// The agent downloads from its configured release and ignores any other instruction.
+type AgentUpdateRequest struct {
+	Version string `cbor:"0,keyasint"`
+	Commit  string `cbor:"1,keyasint,omitempty"`
+}
+
+// AgentUpdateResponse is returned before the agent restarts.
+type AgentUpdateResponse struct {
+	Accepted bool   `cbor:"0,keyasint"`
+	Status   string `cbor:"1,keyasint"`
+	Error    string `cbor:"2,keyasint,omitempty"`
+	Version  string `cbor:"3,keyasint,omitempty"`
+	Commit   string `cbor:"4,keyasint,omitempty"`
 }

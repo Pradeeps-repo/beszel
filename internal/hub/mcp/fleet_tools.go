@@ -10,6 +10,7 @@ import (
 	"ganigeorgiev.com/pocketbase/dbx"
 	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	"ganigeorgiev.com/pocketbase/pocketbase/tools/types"
+	"github.com/henrygd/beszel/internal/agentupdate"
 	"github.com/henrygd/beszel/internal/entities/system"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -32,6 +33,9 @@ func fleetRecordMatches(record *core.Record, params listSystemsParams) bool {
 	if !versionMatches(info.SsApp, params.SsApp) || !versionMatches(info.SsIot, params.SsIot) {
 		return false
 	}
+	if !fleetVersionMatches(info.AgentVersion, params.AgentVersion) {
+		return false
+	}
 	if pkg := strings.TrimSpace(params.Package); pkg != "" && !systemHasPackage(record, pkg) {
 		return false
 	}
@@ -46,6 +50,22 @@ func fleetRecordMatches(record *core.Record, params listSystemsParams) bool {
 		if params.BrightnessMax != nil && value > *params.BrightnessMax {
 			return false
 		}
+	}
+	return true
+}
+
+func fleetVersionMatches(got string, filter *versionFilter) bool {
+	if filter == nil {
+		return true
+	}
+	if eq := strings.TrimSpace(filter.Eq); eq != "" && agentupdate.Compare(got, eq) != 0 {
+		return false
+	}
+	if lt := strings.TrimSpace(filter.Lt); lt != "" && agentupdate.Compare(got, lt) >= 0 {
+		return false
+	}
+	if gt := strings.TrimSpace(filter.Gt); gt != "" && agentupdate.Compare(got, gt) <= 0 {
+		return false
 	}
 	return true
 }

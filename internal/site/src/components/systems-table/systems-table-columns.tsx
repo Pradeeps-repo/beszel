@@ -24,8 +24,8 @@ import {
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 import { BatteryState, ConnectionType, connectionTypeLabels, MeterState, SystemStatus } from "@/lib/enums"
-import { $userSettings } from "@/lib/stores"
-import { cn, decimalString, formatBytes, formatTemperature, parseSemVer, secondsToUptimeString } from "@/lib/utils"
+import { $agentLatest, $userSettings } from "@/lib/stores"
+import { cn, compareFleetVersion, decimalString, formatBytes, formatTemperature, parseSemVer, secondsToUptimeString } from "@/lib/utils"
 import { batteryStateTranslations } from "@/lib/i18n"
 import { connectedWiFi, primaryWiFi, primaryWiFiSignal, wifiNetworkName, wifiSignalState } from "@/lib/wifi"
 import type { SystemRecord, WiFi } from "@/types"
@@ -549,17 +549,21 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 			hideSort: true,
 			header: sortableHeader,
 			cell(info) {
+				const latest = useStore($agentLatest)
 				const version = info.getValue() as string
 				if (!version) {
 					return null
 				}
 				const system = info.row.original
+				const behind = Boolean(latest) && compareFleetVersion(version, latest) < 0
 				let color = "text-red-500"
 				if (system.status === SystemStatus.Up) {
-					color = version === globalThis.BESZEL.HUB_VERSION ? "text-green-500" : "text-yellow-500"
+					color = behind ? "text-yellow-500" : "text-green-500"
 				} else if (system.status === SystemStatus.Paused) {
 					color = "text-primary/40"
 				}
+				const commit = system.info.bc
+				const updateState = system.agent_update?.state
 				return (
 					<Link
 						href={getPagePath($router, "system", { id: system.id })}
@@ -568,7 +572,14 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 							viewMode === "table" && "ps-0.5"
 						)}
 						tabIndex={-1}
-						title={connectionTypeLabels[system.info.ct as ConnectionType]}
+						title={[
+							connectionTypeLabels[system.info.ct as ConnectionType],
+							commit ? `commit ${commit}` : "",
+							behind ? `behind ${latest}` : "",
+							updateState || "",
+						]
+							.filter(Boolean)
+							.join(" · ")}
 						role="none"
 					>
 						{system.info.ct === ConnectionType.WebSocket && (
@@ -578,7 +589,7 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 							<ChevronRightSquareIcon className={cn("size-3 pointer-events-none", color)} />
 						)}
 						{!system.info.ct && <IndicatorDot system={system} className={cn(color, "bg-current mx-0.5")} />}
-						<span className="truncate max-w-14">{info.getValue() as string}</span>
+						<span className={cn("truncate max-w-40", behind && "font-medium")}>{version}</span>
 					</Link>
 				)
 			},

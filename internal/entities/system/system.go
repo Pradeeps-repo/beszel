@@ -232,6 +232,8 @@ type Info struct {
 	// Mode is the current hardware mode before rotation, e.g. "1920x1080".
 	// Screen is the logical size after rotation. Omitted when unknown.
 	Mode string `json:"mod,omitempty" cbor:"34,keyasint,omitempty"`
+	// Commit is the git commit this agent binary was built from.
+	Commit string `json:"bc,omitempty" cbor:"35,keyasint,omitempty"`
 }
 
 // Data that does not change during process lifetime and is not needed in All Systems table
