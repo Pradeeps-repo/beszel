@@ -134,6 +134,11 @@ func (h *Hub) StartHub() error {
 func (h *Hub) initialize(app core.App) error {
 	// set general settings
 	settings := app.Settings()
+	if err := email.ApplyBranding(app); err != nil {
+		return err
+	}
+	// ApplyBranding may have saved settings; reload the local copy before other edits.
+	settings = app.Settings()
 	// batch requests (for alerts)
 	settings.Batch.Enabled = true
 	settings.Batch.MaxRequests = 100

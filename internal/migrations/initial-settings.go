@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"os"
+	"strings"
 
 	"ganigeorgiev.com/pocketbase/pocketbase/core"
 	m "ganigeorgiev.com/pocketbase/pocketbase/migrations"
@@ -15,7 +16,10 @@ func init() {
 	m.Register(func(app core.App) error {
 		// initial settings
 		settings := app.Settings()
-		settings.Meta.AppName = "Beszel"
+		settings.Meta.AppName = "Bright.Blue"
+		if settings.Meta.SenderName == "" || strings.EqualFold(settings.Meta.SenderName, "Support") {
+			settings.Meta.SenderName = "Bright.Blue Alerts"
+		}
 		settings.Meta.HideControls = true
 		settings.Logs.MinLevel = 4
 		if err := app.Save(settings); err != nil {

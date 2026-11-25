@@ -4,6 +4,7 @@ package email
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,7 +51,8 @@ func TestRenderAlertEscapesContent(t *testing.T) {
 	assert.NotContains(t, html, "<b>title</b>")
 	assert.Contains(t, html, "&lt;script&gt;")
 	assert.NotContains(t, html, `href="javascript:`)
-	assert.Contains(t, html, ">Open Beszel</a>", "empty link text falls back")
+	assert.Contains(t, html, ">Open Bright.Blue</a>", "empty link text falls back")
+	assert.NotContains(t, strings.ToLower(html), "beszel")
 	assert.NotContains(t, html, "Manage notifications", "no settings link when empty")
 }
 
@@ -70,9 +72,10 @@ func TestMessageBlocks(t *testing.T) {
 }
 
 func TestWrapPocketBaseHTML(t *testing.T) {
-	html, ok := wrapPocketBaseHTML("Reset your Beszel password", "<html><head><style>x</style></head><body>\n<p>Hello,</p><a class=\"btn\" href=\"https://x/reset\">Reset password</a>\n</body></html>")
+	html, ok := wrapPocketBaseHTML("Reset your Bright.Blue password", "<html><head><style>x</style></head><body>\n<p>Hello,</p><a class=\"btn\" href=\"https://x/reset\">Reset password</a>\n</body></html>")
 	require.True(t, ok)
-	assert.Contains(t, html, "<title>Reset your Beszel password</title>")
+	assert.Contains(t, html, "<title>Reset your Bright.Blue password</title>")
+	assert.NotContains(t, strings.ToLower(html), "beszel")
 	assert.Contains(t, html, `<p>Hello,</p><a class="btn" href="https://x/reset">Reset password</a>`)
 	assert.NotContains(t, html, "<style>x</style>")
 
