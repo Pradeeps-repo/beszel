@@ -15,25 +15,32 @@ func TestRenderAlert(t *testing.T) {
 	html, err := RenderAlert(Alert{
 		Title:        "CPU above threshold on web-1",
 		Message:      "CPU averaged 91.00% for the previous 10 minutes.",
-		Link:         "https://beszel.example.com/system/abc",
+		Link:         "https://hub.example.com/system/abc",
 		LinkText:     "View web-1",
-		SettingsLink: "https://beszel.example.com/settings/notifications",
+		SettingsLink: "https://hub.example.com/settings/notifications",
+		AppURL:       "https://hub.example.com",
 	})
 	require.NoError(t, err)
 
 	assert.Contains(t, html, "<title>CPU above threshold on web-1</title>")
 	assert.Contains(t, html, "CPU averaged 91.00% for the previous 10 minutes.")
-	assert.Contains(t, html, `href="https://beszel.example.com/system/abc"`)
+	assert.Contains(t, html, `href="https://hub.example.com/system/abc"`)
 	assert.Contains(t, html, ">View web-1</a>")
-	assert.Contains(t, html, `href="https://beszel.example.com/settings/notifications"`)
+	assert.Contains(t, html, `href="https://hub.example.com/settings/notifications"`)
+	assert.Contains(t, html, "Bright.Watch")
+	assert.Contains(t, html, "Bright.Watch by Bright.Blue")
+	assert.Contains(t, html, `bgcolor="#183EF6"`)
+	assert.Contains(t, html, `src="https://hub.example.com/static/icon.png"`)
+	assert.NotContains(t, strings.ToLower(html), "beszel")
 
 	if dir := os.Getenv("BESZEL_EMAIL_PREVIEW_DIR"); dir != "" {
 		preview, _ := RenderAlert(Alert{
 			Title:        "Container api is unhealthy on web-1",
 			Message:      "Container api became unhealthy.\nPrevious state: healthy\n\napi logs:\n```\nERROR connection refused\nretrying in 5s\n```",
-			Link:         "https://beszel.example.com/system/abc",
+			Link:         "https://hub.example.com/system/abc",
 			LinkText:     "View web-1",
-			SettingsLink: "https://beszel.example.com/settings/notifications",
+			SettingsLink: "https://hub.example.com/settings/notifications",
+			AppURL:       "https://hub.example.com",
 		})
 		require.NoError(t, os.WriteFile(dir+"/alert_email.html", []byte(preview), 0o644))
 	}
@@ -51,7 +58,8 @@ func TestRenderAlertEscapesContent(t *testing.T) {
 	assert.NotContains(t, html, "<b>title</b>")
 	assert.Contains(t, html, "&lt;script&gt;")
 	assert.NotContains(t, html, `href="javascript:`)
-	assert.Contains(t, html, ">Open Bright.Blue</a>", "empty link text falls back")
+	assert.Contains(t, html, ">Open Bright.Watch</a>", "empty link text falls back")
+	assert.Contains(t, html, "Bright.Watch")
 	assert.NotContains(t, strings.ToLower(html), "beszel")
 	assert.NotContains(t, html, "Manage notifications", "no settings link when empty")
 }
@@ -72,13 +80,19 @@ func TestMessageBlocks(t *testing.T) {
 }
 
 func TestWrapPocketBaseHTML(t *testing.T) {
-	html, ok := wrapPocketBaseHTML("Reset your Bright.Blue password", "<html><head><style>x</style></head><body>\n<p>Hello,</p><a class=\"btn\" href=\"https://x/reset\">Reset password</a>\n</body></html>")
+	html, ok := wrapPocketBaseHTML("Reset your Bright.Watch password", "<html><head><style>x</style></head><body>\n<p>Hello,</p><a class=\"btn\" href=\"https://hub.example.com/reset\">Reset password</a>\n</body></html>", "https://hub.example.com")
 	require.True(t, ok)
-	assert.Contains(t, html, "<title>Reset your Bright.Blue password</title>")
+	assert.Contains(t, html, "<title>Reset your Bright.Watch password</title>")
+	assert.Contains(t, html, "Bright.Watch")
+	assert.Contains(t, html, "Bright.Watch by Bright.Blue")
+	assert.Contains(t, html, `src="https://hub.example.com/static/icon.png"`)
+	assert.Contains(t, html, `bgcolor="#183EF6"`)
 	assert.NotContains(t, strings.ToLower(html), "beszel")
-	assert.Contains(t, html, `<p>Hello,</p><a class="btn" href="https://x/reset">Reset password</a>`)
+	assert.Contains(t, html, `<p>Hello,</p>`)
+	assert.Contains(t, html, `href="https://hub.example.com/reset"`)
+	assert.Contains(t, html, ">Reset password</a>")
 	assert.NotContains(t, html, "<style>x</style>")
 
-	_, ok = wrapPocketBaseHTML("subject", "<p>no body tag</p>")
+	_, ok = wrapPocketBaseHTML("subject", "<p>no body tag</p>", "")
 	assert.False(t, ok)
 }

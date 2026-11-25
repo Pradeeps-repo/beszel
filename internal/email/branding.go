@@ -9,9 +9,9 @@ import (
 
 const (
 	// AppName is the product name used in {APP_NAME} email placeholders.
-	AppName = "Bright.Blue"
+	AppName = "Bright.Watch"
 	// SenderName is the From name when the saved sender is still a default.
-	SenderName = "Bright.Blue Alerts"
+	SenderName = "Bright.Watch Alerts"
 )
 
 var beszelWord = regexp.MustCompile(`(?i)beszel`)
@@ -55,7 +55,7 @@ func ApplyBranding(app core.App) error {
 
 func isDefaultAppName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "", "beszel", "acme":
+	case "", "beszel", "acme", "bright.blue":
 		return true
 	default:
 		return false
@@ -64,7 +64,7 @@ func isDefaultAppName(name string) bool {
 
 func isDefaultSenderName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "", "support", "beszel", "acme":
+	case "", "support", "beszel", "acme", "bright.blue alerts":
 		return true
 	default:
 		return false
@@ -80,8 +80,8 @@ func rebrandTemplates(collection *core.Collection) bool {
 		&collection.OTP.EmailTemplate,
 		&collection.AuthAlert.EmailTemplate,
 	} {
-		subject := replaceBeszel(tpl.Subject)
-		body := replaceBeszel(tpl.Body)
+		subject := replaceProductName(tpl.Subject)
+		body := replaceProductName(tpl.Body)
 		if subject == tpl.Subject && body == tpl.Body {
 			continue
 		}
@@ -92,6 +92,8 @@ func rebrandTemplates(collection *core.Collection) bool {
 	return changed
 }
 
-func replaceBeszel(value string) string {
-	return beszelWord.ReplaceAllString(value, AppName)
+func replaceProductName(value string) string {
+	value = beszelWord.ReplaceAllString(value, AppName)
+	// The previous default wrote Bright.Blue into any template that said Beszel.
+	return strings.ReplaceAll(value, "Bright.Blue", AppName)
 }
