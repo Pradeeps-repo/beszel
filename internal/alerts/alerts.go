@@ -281,6 +281,7 @@ func (am *AlertManager) SendAlert(data AlertMessageData) error {
 		Link:         data.Link,
 		LinkText:     data.LinkText,
 		SettingsLink: am.hub.MakeLink("settings", "notifications"),
+		AppURL:       am.hub.Settings().Meta.AppURL,
 	}); err != nil {
 		am.hub.Logger().Error("Failed to render email alert HTML", "err", err)
 	} else {

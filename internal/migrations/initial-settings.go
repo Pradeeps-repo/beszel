@@ -16,9 +16,9 @@ func init() {
 	m.Register(func(app core.App) error {
 		// initial settings
 		settings := app.Settings()
-		settings.Meta.AppName = "Bright.Blue"
-		if settings.Meta.SenderName == "" || strings.EqualFold(settings.Meta.SenderName, "Support") {
-			settings.Meta.SenderName = "Bright.Blue Alerts"
+		settings.Meta.AppName = "Bright.Watch"
+		if settings.Meta.SenderName == "" || strings.EqualFold(settings.Meta.SenderName, "Support") || strings.EqualFold(settings.Meta.SenderName, "Bright.Blue Alerts") {
+			settings.Meta.SenderName = "Bright.Watch Alerts"
 		}
 		settings.Meta.HideControls = true
 		settings.Logs.MinLevel = 4
